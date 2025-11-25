@@ -49,17 +49,6 @@ await exportAssets(input, output);
 - `log`: `true`
 - `group`: `"container"`
 - `assetType`: `"all"`
-- `filenameFormat`: `"assetName"`
-- `imageFormat`: `"png"`
-- `audioFormat`: `"wav"`
-- `l2dGroupOption`: `"container"`
-- `l2dMotionMode`: `"monoBehaviour"`
-- `fbxScaleFactor`: `1`
-- `fbxBoneSize`: `10`
-- `fbxAnimation`: `"auto"`
-- `blockinfoComp`: `"auto"`
-- `blockComp`: `"auto"`
-- `exportAssetList`: `"none"`
 - `cliPath`: 会自动从 `bin/` 检测
 
 你可以通过传入配置对象覆盖默认选项：
