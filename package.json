@@ -1,13 +1,14 @@
 {
   "name": "node-asset-studio-mod",
-  "version": "0.0.1",
-  "description": "node version of AssetStudioModCLI",
+  "version": "0.1.0",
+  "description": "Node.js adapter for AssetStudioMod CLI",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "postinstall": "node scripts/download-cli.js"
+    "postinstall": "node scripts/download-cli.js",
+    "pub": "pnpm publish"
   },
   "files": [
     "dist",
@@ -20,8 +21,8 @@
     }
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "StarFreedomX",
+  "license": "MIT",
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
     "@types/node": "^24.10.1",
