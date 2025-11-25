@@ -1,0 +1,13 @@
+/AssetBundleInfo/
+/node_modules/
+*-lock.json
+*-lock.yaml
+/compare/
+/assets/
+/analysing/
+/history_store/
+/src/.env
+/dist/
+/.idea/
+/bin/
+/pnpm-workspace.yaml

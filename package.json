@@ -1,0 +1,31 @@
+{
+  "name": "node-asset-studio-mod",
+  "version": "0.0.1",
+  "description": "node version of AssetStudioModCLI",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "postinstall": "node scripts/download-cli.js"
+  },
+  "files": [
+    "dist",
+    "scripts"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.20.0",
+  "dependencies": {
+    "@types/node": "^24.10.1",
+    "dotenv": "^17.2.3",
+    "unzipper": "^0.12.3"
+  }
+}
