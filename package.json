@@ -1,6 +1,6 @@
 {
   "name": "node-asset-studio-mod",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Node.js adapter for AssetStudioMod CLI",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
