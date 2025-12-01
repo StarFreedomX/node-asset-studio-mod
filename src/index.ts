@@ -182,14 +182,47 @@ export class AssetExporter {
 
         await new Promise<void>((resolve, reject) => {
             const proc = spawn(cliPath, args, { shell: true, windowsHide: true });
+
+            let settled = false; // 防止重复 resolve/reject
+
+            const fail = (err: any) => {
+                if (!settled) {
+                    settled = true;
+                    proc.kill(); // 终止子进程
+                    reject(err);
+                }
+            };
+
             if (useLog) {
-                proc.stdout.on("data", (d) =>
-                    process.stdout.write(d.toString()));
-                proc.stderr.on("data", (d) =>
-                    process.stderr.write(d.toString()));
+                proc.stdout.on("data", (d) => {
+                    const text = d.toString();
+                    process.stdout.write(text);
+
+                    // 检测错误关键字
+                    if (/error|exception|failed/i.test(text)) {
+                        fail(new Error(`AssetStudio CLI runtime error: ${text}`));
+                    }
+                });
+
+                proc.stderr.on("data", (d) => {
+                    const text = d.toString();
+                    process.stderr.write(text);
+
+                    // stderr 一般就是错
+                    if (/error|exception|failed/i.test(text)) {
+                        fail(new Error(`AssetStudio CLI stderr error: ${text}`));
+                    }
+                });
             }
-            proc.on("error", reject);
+
+            proc.on("error", (err) => {
+                fail(err);
+            });
+
             proc.on("close", (code) => {
+                if (settled) return; // 已经处理过
+
+                settled = true;
                 if (code === 0) {
                     resolve();
                 } else {
@@ -197,6 +230,7 @@ export class AssetExporter {
                 }
             });
         });
+
 
     }
 }
