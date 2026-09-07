@@ -19,7 +19,8 @@
     "scripts/download-cli.js",
     "readme.md",
     "readme_CN.md",
-    "scripts/cli-runtime.js"
+    "scripts/cli-runtime.js",
+    "WORKTREES.md"
   ],
   "exports": {
     ".": {
