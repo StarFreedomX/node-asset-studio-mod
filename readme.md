@@ -112,3 +112,17 @@ Supported modes (matching TS `ExportMode`):
 ```
 "extract", "export", "exportRaw", "dump", "info", "live2d", "splitObjects", "animator"
 ```
+
+## Build and publish
+
+The published CLI adapter downloads its platform binary on installation and requires .NET 9 Runtime.
+
+```sh
+npm install --ignore-scripts
+npm run build
+npm pack
+# Run after inspecting the generated tarball:
+npm publish ./node-asset-studio-mod-1.0.5.tgz --access public
+```
+
+`npm pack` rebuilds through `prepack`. Use an unused package version for each release. Prefer separate checkouts when building multiple implementations; generated dependencies and runtime files are not switched by Git.

@@ -109,3 +109,17 @@ await exporter.exportAssets(input, output);
 ```
 "extract", "export", "exportRaw", "dump", "info", "live2d", "splitObjects", "animator"
 ```
+
+## 构建与发布
+
+发布后的 CLI 适配器在安装时下载对应平台的程序，运行需要 .NET 9 Runtime。
+
+```sh
+npm install --ignore-scripts
+npm run build
+npm pack
+# 检查生成的压缩包后再发布：
+npm publish ./node-asset-studio-mod-1.0.5.tgz --access public
+```
+
+`npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。多个实现建议使用独立检出目录：Git 切换分支不会切换已安装依赖和下载的运行时文件。

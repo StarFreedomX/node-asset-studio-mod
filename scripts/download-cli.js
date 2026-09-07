@@ -29,13 +29,13 @@ Linux/macOS (.NET Runtime): https://dotnet.microsoft.com/download/dotnet/9.0
 }
 
 function getDownloadURL() {
-    const base = 'https://github.com/aelurum/AssetStudio/releases/download/v0.19.0';
+    const base = 'https://github.com/aelurum/AssetStudioMod/releases/download/v0.19.0';
 
     switch (os.platform()) {
         case 'win32':
             return `${base}/AssetStudioModCLI_net9_win64.zip`;
         case 'darwin':
-            return `${base}/AssetStudioModCLI_net9_osx.zip`;
+            return `${base}/AssetStudioModCLI_net9_mac64.zip`;
         case 'linux':
             return `${base}/AssetStudioModCLI_net9_linux64.zip`;
     }
@@ -78,13 +78,18 @@ async function extract() {
     await fs.createReadStream(zipPath)
         .pipe(unzipper.Extract({ path: binDir }))
         .promise();
+    // unzipper writes regular files without restoring the ZIP's executable bits.
+    if (os.platform() !== 'win32') {
+        const folder = path.basename(new URL(getDownloadURL()).pathname, '.zip');
+        await fs.promises.chmod(path.join(binDir, folder, 'AssetStudioModCLI'), 0o755);
+    }
 }
 
 async function main() {
     await checkDotnet();
 
     const url = getDownloadURL();
-    const urls = [...mirrorURLs(url), url];
+    const urls = [url, ...mirrorURLs(url)];
 
     for (const u of urls) {
         try {

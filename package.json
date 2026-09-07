@@ -1,25 +1,27 @@
 {
   "name": "node-asset-studio-mod",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Node.js adapter for AssetStudioMod CLI",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "node scripts/build.js",
     "postinstall": "node scripts/download-cli.js",
-    "pub": "npm publish"
+    "pub": "npm publish",
+    "prepack": "npm run build"
   },
   "files": [
     "dist",
-    "scripts",
+    "scripts/build.js",
+    "scripts/download-cli.js",
     "readme.md",
     "readme_CN.md"
   ],
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "keywords": [],
@@ -30,5 +32,8 @@
     "@types/node": "^24.10.1",
     "dotenv": "^17.2.3",
     "unzipper": "^0.12.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
   }
 }
