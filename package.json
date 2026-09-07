@@ -1,25 +1,38 @@
 {
   "name": "node-asset-studio-mod",
   "version": "1.0.3",
-  "description": "Node.js adapter for AssetStudioMod CLI",
+  "description": "Controlled Node.js pipe API for linked AssetStudioMod libraries",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc",
-    "postinstall": "node scripts/download-cli.js",
+    "build": "tsc && node scripts/build-bridge.js",
+    "build:ts": "tsc",
+    "setup:bridge": "node scripts/setup-bridge.js --force",
+    "postinstall": "node scripts/setup-bridge.js",
+    "prepack": "npm run build",
+    "test": "npm run build:ts && node --test tests/*.test.mjs",
+    "test:integration": "npm run build:ts && node --test tests/integration.mjs",
     "pub": "pnpm publish"
   },
   "files": [
     "dist",
     "scripts",
+    "bridge/Program.cs",
+    "bridge/Options.cs",
+    "bridge/vendor",
+    "bridge/AssetStudioBridge.csproj",
+    "bin/bridge",
     "readme.md",
     "readme_CN.md"
   ],
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "keywords": [],
@@ -30,5 +43,8 @@
     "@types/node": "^24.10.1",
     "dotenv": "^17.2.3",
     "unzipper": "^0.12.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
   }
 }

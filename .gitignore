@@ -10,4 +10,6 @@
 /dist/
 /.idea/
 /bin/
+/bridge/bin/
+/bridge/obj/
 /pnpm-workspace.yaml

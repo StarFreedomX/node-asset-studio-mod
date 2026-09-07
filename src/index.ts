@@ -1,246 +1,64 @@
-import { spawn } from "child_process";
-import path from "path";
-import fs from "node:fs";
-import os from "os";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-export const AssetTypes = [
-    "all",
-    "tex2d",
-    "tex2dArray",
-    "sprite",
-    "textasset",
-    "monobehaviour",
-    "font",
-    "shader",
-    "movietexture",
-    "audio",
-    "video",
-    "mesh",
-    "animator",
-] as const;
-
-export type ExportMode =
-    | "extract"
-    | "export"
-    | "exportRaw"
-    | "dump"
-    | "info"
-    | "live2d"
-    | "splitObjects"
-    | "animator";
-
-const cliArgMap: Record<string, string | [string, boolean?]> = {
-    overwrite: "-r",
-    logLevel: "--log-level",
-    logOutput: "--log-output",
-    imageFormat: "--image-format",
-    audioFormat: "--audio-format",
-    l2dGroupOption: "--l2d-group-option",
-    l2dMotionMode: "--l2d-motion-mode",
-    l2dSearchByFilename: "--l2d-search-by-filename",
-    l2dForceBezier: "--l2d-force-bezier",
-    fbxScaleFactor: "--fbx-scale-factor",
-    fbxBoneSize: "--fbx-bone-size",
-    fbxAnimation: "--fbx-animation",
-    fbxUVsAsDiffuse: "--fbx-uvs-as-diffuse",
-    filterByName: "--filter-by-name",
-    filterByContainer: "--filter-by-container",
-    filterByPathID: "--filter-by-pathid",
-    filterByText: "--filter-by-text",
-    filterWithRegex: "--filter-with-regex",
-    blockinfoComp: "--blockinfo-comp",
-    blockComp: "--block-comp",
-    maxExportTasks: "--max-export-tasks",
-    exportAssetList: "--export-asset-list",
-    assemblyFolder: "--assembly-folder",
-    unityVersion: "--unity-version",
-    decompressToDisk: "--decompress-to-disk",
-    notRestoreExtension: "--not-restore-extension",
-    ignoreTypetree: "--ignore-typetree",
-    loadAll: "--load-all",
-};
-
-export type AssetType = typeof AssetTypes[number];
-
-export interface ExportAssetsDefaultConfig {
-    mode?: ExportMode;
-    cliPath?: string;
-    log?: boolean;
-    assetType?: AssetType | AssetType[];
-    group?: "none" | "type" | "container" | "containerFull" | "fileName" | "sceneHierarchy";
-    filenameFormat?: "assetName" | "assetName_pathID" | "pathID";
-    overwrite?: boolean;
-    logLevel?: "verbose" | "debug" | "info" | "warning" | "error";
-    logOutput?: "console" | "file" | "both";
-    imageFormat?: "none" | "jpg" | "png" | "bmp" | "tga" | "webp";
-    audioFormat?: "none" | "wav";
-    l2dGroupOption?: "container" | "fileName" | "modelName";
-    l2dMotionMode?: "monoBehaviour" | "animationClip";
-    l2dSearchByFilename?: boolean;
-    l2dForceBezier?: boolean;
-    fbxScaleFactor?: number;
-    fbxBoneSize?: number;
-    fbxAnimation?: "auto" | "skip" | "all";
-    fbxUVsAsDiffuse?: boolean;
-    filterByName?: string;
-    filterByContainer?: string;
-    filterByPathID?: string;
-    filterByText?: string;
-    filterWithRegex?: boolean;
-    blockinfoComp?: "auto" | "zstd" | "oodle" | "lz4" | "lzma";
-    blockComp?: "auto" | "zstd" | "oodle" | "lz4" | "lzma";
-    maxExportTasks?: number;
-    exportAssetList?: "none" | "xml";
-    assemblyFolder?: string;
-    unityVersion?: string;
-    decompressToDisk?: boolean;
-    notRestoreExtension?: boolean;
-    ignoreTypetree?: boolean;
-    loadAll?: boolean;
-}
+import fs from 'node:fs';
+import path from 'node:path';
+import { BridgeTransport } from './transport.js';
+import { AssetStudioError, type AssetResult, type OperationOptions } from './types.js';
+export * from './types.js';
 
 export class AssetExporter {
-    private defaultConfig: ExportAssetsDefaultConfig;
+    private readonly transport: BridgeTransport;
+    private readonly defaultConfig: OperationOptions;
 
-    constructor(defaultConfig: ExportAssetsDefaultConfig = {}) {
-        this.defaultConfig = {
-            mode: "export",
-            log: true,
-            group: "container",
-            assetType: "all",
-            ...defaultConfig,
-        };
+    constructor(config: OperationOptions = {}) {
+        if (config.cliPath) throw new AssetStudioError('INVALID_CONFIG', 'cliPath is no longer supported; use bridgePath for a custom bridge DLL');
+        this.defaultConfig = { mode: 'export', log: true, group: 'container', assetType: 'all', ...config };
+        this.transport = new BridgeTransport(config);
     }
 
-    private getDefaultCliPath() {
-        const base = path.resolve(__dirname, "../bin");
+    /** Process id for diagnostics. The same worker is reused until cancelled or closed. */
+    get workerPid(): number | undefined { return this.transport.pid; }
 
-        // 遍历 bin 下的所有子目录
-        const subdirs = fs.readdirSync(base, { withFileTypes: true })
-            .filter(d => d.isDirectory())
-            .map(d => path.join(base, d.name));
-
-        for (const dir of subdirs) {
-            const exe = os.platform() === "win32"
-                ? path.join(dir, "AssetStudioModCLI.exe")
-                : path.join(dir, "AssetStudioModCLI");
-
-            if (fs.existsSync(exe)) return exe;
-        }
-
-        return null;
+    inspect(input: string, options: OperationOptions = {}): Promise<AssetResult> {
+        return this.run('inspect', input, undefined, options);
     }
 
+    exportAssets(input: string, output: string, options: OperationOptions = {}): Promise<AssetResult> {
+        return this.run('export', input, output, options);
+    }
 
-    async exportAssets(input: string, output: string): Promise<void> {
-        const cfg = this.defaultConfig;
-        const useLog = cfg.log ?? true;
-
-        if (!input) throw new Error("missing input path");
-        if (!output) throw new Error("missing output path");
-        if (!fs.existsSync(input)) throw new Error(`input not exist: ${input}`);
-        if (!fs.existsSync(output)) fs.mkdirSync(output, { recursive: true });
-
-        let cliPath = cfg.cliPath || this.getDefaultCliPath();
-        if (!cliPath) throw new Error("Cannot find AssetStudioModCLI，please run `pnpm install` or check the folder /bin");
-
-        let types = "all";
-        if (cfg.assetType) {
-            types = Array.isArray(cfg.assetType) ? cfg.assetType.join(",") : cfg.assetType;
-            types.split(",").forEach((t) => {
-                if (!AssetTypes.includes(t as AssetType)) throw new Error(`unsupported type: ${t}`);
-            });
-        }
-
-        const args: string[] = [
-            wrapPath(input),
-            "-m", cfg.mode!,
-            "-t", types,
-            "-g", cfg.group!,
-            "-o", wrapPath(output),
-        ];
-
-        // 自动生成 args
-        for (const [key, cliName] of Object.entries(cliArgMap)) {
-            const val = (cfg as any)[key];
-            if (val === undefined || val === false) continue;
-            if (typeof cliName === "string") {
-                // 布尔参数或有值参数
-                if (typeof val === "boolean") args.push(cliName);
-                else args.push(cliName, val.toString());
-            } else {
-                // tuple
-                args.push(cliName[0], val.toString());
-            }
-        }
-
-        if (useLog) console.log("exec:", cliPath, args.join(" "));
-
-        await new Promise<void>((resolve, reject) => {
-            const proc = spawn(cliPath, args, { shell: true, windowsHide: true });
-
-            let settled = false; // 防止重复 resolve/reject
-
-            const fail = (err: any) => {
-                if (!settled) {
-                    settled = true;
-                    proc.kill(); // 终止子进程
-                    reject(err);
-                }
-            };
-
-            if (useLog) {
-                proc.stdout.on("data", (d) => {
-                    const text = d.toString();
-                    process.stdout.write(text);
-
-                    // 检测错误关键字
-                    if (/error|exception|failed/i.test(text)) {
-                        fail(new Error(`AssetStudio CLI runtime error: ${text}`));
-                    }
-                });
-
-                proc.stderr.on("data", (d) => {
-                    const text = d.toString();
-                    process.stderr.write(text);
-
-                    // stderr 一般就是错
-                    if (/error|exception|failed/i.test(text)) {
-                        fail(new Error(`AssetStudio CLI stderr error: ${text}`));
-                    }
-                });
-            }
-
-            proc.on("error", (err) => {
-                fail(err);
-            });
-
-            proc.on("close", (code) => {
-                if (settled) return; // 已经处理过
-
-                settled = true;
-                if (code === 0) {
-                    resolve();
-                } else {
-                    reject(new Error(`AssetStudio CLI exit code: ${code}`));
-                }
-            });
+    private async run(method: 'inspect' | 'export', input: string, output: string | undefined,
+        options: OperationOptions): Promise<AssetResult> {
+        if (!input) throw new AssetStudioError('INVALID_INPUT', 'Missing input path');
+        if (!fs.existsSync(input)) throw new AssetStudioError('INPUT_NOT_FOUND', `Input does not exist: ${input}`);
+        if (method === 'export' && !output) throw new AssetStudioError('INVALID_INPUT', 'Missing output path');
+        if (options.cliPath || options.dotnetPath || options.bridgePath)
+            throw new AssetStudioError('INVALID_CONFIG', 'Set bridgePath and dotnetPath when constructing the exporter');
+        const merged = { ...this.defaultConfig, ...options };
+        const { log, onEvent, signal, timeoutMs, cliPath, dotnetPath, bridgePath, ...config } = merged;
+        return this.transport.request(method, path.resolve(input), output ? path.resolve(output) : undefined, config, {
+            signal, timeoutMs,
+            onEvent(event) {
+                if (onEvent) onEvent(event);
+                else if (log && event.type === 'log') process.stderr.write(`[${event.level}] ${event.message}\n`);
+            },
         });
-
-
     }
+
+    /** Stops the worker, waits for exit, and permanently closes this instance. */
+    close(): Promise<void> { return this.transport.close(); }
+    [Symbol.asyncDispose](): Promise<void> { return this.close(); }
 }
 
-function wrapPath(p: string) {
-    const resolved = path.resolve(p);
-    return `"${resolved}"`;
+export const createExporter = (config?: OperationOptions): AssetExporter => new AssetExporter(config);
+
+/** One-shot convenience function: always closes its worker, including on failure. */
+export async function exportAssets(input: string, output: string, config?: OperationOptions): Promise<AssetResult> {
+    const exporter = new AssetExporter(config);
+    try { return await exporter.exportAssets(input, output); }
+    finally { await exporter.close(); }
 }
 
-// 默认快捷导出
-const defaultExporter = new AssetExporter();
-export const exportAssets = defaultExporter.exportAssets.bind(defaultExporter);
-export const createExporter = (config?: ExportAssetsDefaultConfig) => new AssetExporter(config);
+export async function inspectAssets(input: string, config?: OperationOptions): Promise<AssetResult> {
+    const exporter = new AssetExporter(config);
+    try { return await exporter.inspect(input); }
+    finally { await exporter.close(); }
+}

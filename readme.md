@@ -1,114 +1,104 @@
 # node-asset-studio-mod
 
-Node.js wrapper for [AssetStudioMod](https://github.com/aelurum/AssetStudio) CLI.
+A controlled Node.js / TypeScript pipe API for [AssetStudioMod](https://github.com/aelurum/AssetStudioMod).
 
-other language:
-* [简体中文](readme_CN.md)
+[简体中文](readme_CN.md)
 
-## Environment
+Node.js exchanges versioned JSON Lines with a persistent .NET bridge over stdin/stdout. The bridge links AssetStudio DLLs and calls loading, parsing and export methods directly. It does not launch AssetStudioModCLI or parse console text to determine success.
 
-**.NET 9 Runtime required**
+This is an isolated worker process, not an in-process .NET binding. Input is currently a local file/directory path; exported files go to disk. The pipe carries requests, metadata, progress and errors, not resource bytes.
 
-- **Windows**: [.NET Desktop Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
-- **Linux / Mac**: [.NET Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
+## Setup
 
-Ensure the runtime is installed before using this library.
+Requires Node.js 22+ (ESM) and .NET 9 Runtime. Building from source requires .NET 9 SDK:
 
----
-
-## Installation
-
-```
-# using pnpm
-pnpm install node-asset-studio-mod
-
-# or npm
-npm install node-asset-studio-mod
-
-# or yarn
-yarn add node-asset-studio-mod
+```bash
+pnpm install
+pnpm run build
 ```
 
-> During installation, the CLI binary will be downloaded automatically into `bin/` according to your platform.
+Source postinstall downloads the pinned official v0.19.0 portable archive, checks SHA-256 and builds the bridge. Published packages include the portable bridge and upstream native libraries, so consumers only need Runtime. `prepack` builds both TypeScript and the bridge.
 
----
+Use `ASSET_STUDIO_DOTNET` to select the build SDK. The scripts also check `bin/dotnet/dotnet`, `DOTNET_ROOT` and PATH. No system runtime is automatically installed. Run `npm run setup:bridge` to rebuild dependencies, or set `ASSET_STUDIO_ARCHIVE` to a local official portable ZIP for offline setup.
+
+Native support depends on the .NET process OS/architecture. Tested on macOS x64 using x64 .NET on Apple Silicon; other platforms need validation.
 
 ## Usage
 
-### 1. Using the default exporter function
+One-shot helpers always close their worker:
 
-```
-import { exportAssets } from "node-asset-studio-mod";
+```js
+import { inspectAssets, exportAssets } from 'node-asset-studio-mod';
 
-const input = "path/to/assets/9.3.0.180";
-const output = "path/to/analysing/9.3.0.180";
+const input = '/absolute/path/to/res014089';
+const info = await inspectAssets(input, { unityVersion: '2022.3.62f1' });
+console.log(info.assets);
 
-await exportAssets(input, output);
-```
-
-**Default options:**
-
-- `mode`: `"export"`
-- `log`: `true`
-- `group`: `"container"`
-- `assetType`: `"all"`
-- `cliPath`: automatically detected from `bin/`
-
-You can override options by passing a config object:
-
-```
-import { exportAssets } from "node-asset-studio-mod";
-
-await exportAssets(input, output, {
-assetType: ["tex2d", "sprite", "textasset"],
-overwrite: true,
-imageFormat: "png",
-logLevel: "info",
+const result = await exportAssets(input, '/absolute/path/to/output', {
+  unityVersion: '2022.3.62f1',
+  assetType: ['tex2d', 'sprite', 'textasset'],
+  imageFormat: 'png',
 });
+console.log(result.exportedCount);
 ```
 
----
+Reuse a connection and control cancellation:
 
-### 2. Using class instance for more control
+```js
+import { createExporter } from 'node-asset-studio-mod';
 
-```
-import { AssetExporter } from "node-asset-studio-mod";
-
-const exporter = new AssetExporter({
-cliPath: "E:/myproject/bin/AssetStudioModCLI.exe", // optional
-mode: "export",
-assetType: ["tex2d", "sprite"],
-overwrite: true,
-});
-
-await exporter.exportAssets(input, output);
-```
-
-- You can create multiple instances with different configurations.
-- `cliPath` is optional; the library will automatically detect the binary in `bin/`.
-
----
-
-### 3. Asset Types
-
-The supported asset types (matching TS `AssetTypes`) are:
-
-```
-"all", "tex2d", "tex2dArray", "sprite", "textasset", "monobehaviour",
-"font", "shader", "movietexture", "audio", "video", "mesh", "animator"
+const exporter = createExporter({ unityVersion: '2022.3.62f1', log: false });
+const controller = new AbortController();
+try {
+  await exporter.inspect('/absolute/path/to/res014089');
+  await exporter.exportAssets('/absolute/path/to/res014089', '/absolute/path/to/output', {
+    signal: controller.signal,
+    timeoutMs: 30_000,
+    onEvent(event) { console.log(event); },
+  });
+  // A UI cancel button can call controller.abort() while the request is active.
+} finally {
+  await exporter.close();
+}
 ```
 
-**Notes:**
+One request per instance: overlapping calls reject with `BUSY`. Separate instances can run concurrently. Sequential requests reuse the worker and clear upstream state between operations. Always close an instance when finished (`Symbol.asyncDispose` is also supported); one-shot helpers handle this automatically.
 
-- `"all"` exports all types listed above.
-- You can specify multiple types using an array, e.g., `["tex2d", "sprite"]`.
+Abort/timeout terminates that worker and waits for exit before rejecting. The next request starts a fresh worker, with no automatic retry of failed operations. `close()` permanently closes the instance. Cancellation/failure can leave partially written files; no rollback is performed. Default timeout is 120 seconds including startup; `0` disables it.
 
----
+`onEvent` receives typed `log` and `progress` events. If it throws, the operation stops with `CALLBACK_ERROR`. Without a callback, `log: true` writes logs to stderr. `log: false` never disables error detection.
 
-### 4. Export Modes
+## Results and errors
 
-Supported modes (matching TS `ExportMode`):
+Methods return `{ loadedFiles, assetCount, exportedCount, output, assets }`. Each asset contains `{ name, type, pathId, container, size, source }`. `pathId` is a string to preserve Int64 precision. `assetCount` counts selected exportable assets, not every Unity object. Exported asset/object counts may differ from output file counts. `info` returns count 0 and output null; Live2D returns exportedCount null; `extract` reports extracted files with an empty asset list.
 
+`AssetStudioError` contains `code`, `message`, `details`. Codes include `INPUT_NOT_FOUND`, `INVALID_CONFIG`, `ASSET_PROCESSING_ERROR`, `ABORTED`, `TIMEOUT`, `BUSY`, `CLOSED`, `BRIDGE_NOT_FOUND`, `BRIDGE_START_FAILED`, `BRIDGE_EXIT`, `PIPE_ERROR`, `PROTOCOL_ERROR`, `CALLBACK_ERROR`.
+
+Empty/invalid Unity input and upstream Error-level diagnostics reject explicitly, regardless of logging settings or process exit status. Error details retain at most 100 entries; a response frame is limited to approximately 64 MiB.
+
+## Options and migration
+
+See `src/types.ts` for the full typed API. Existing export/group/image/audio/filter/Unity/Live2D/FBX options are retained, including `filenameFormat`. The shortcut now supports a third config argument; instance methods support per-call overrides.
+
+Modes: `extract`, `export`, `exportRaw`, `dump`, `info`, `live2d`, `splitObjects`, `animator`. Live2D/model modes select supporting object types according to upstream requirements.
+
+Asset types: `all`, `tex2d`, `tex2dArray`, `sprite`, `textasset`, `monobehaviour`, `font`, `shader`, `movietexture`, `audio`, `video`, `mesh`, `animator`.
+
+Breaking changes:
+
+- `cliPath` is rejected; set constructor `bridgePath` / `dotnetPath` for a custom DLL/runtime.
+- `logOutput: 'file' | 'both'` is rejected; route logs through `onEvent` instead.
+- Results are structured rather than void. Reusable instances require `close()`.
+- Filter precedence follows upstream: text > path ID > name/container combination. Regex strings are not split on commas.
+
+## Tests
+
+```bash
+npm test
+ASSET_STUDIO_TEST_INPUT=/absolute/path/to/res014089 npm run test:integration
+node scripts/export-assets.js /absolute/path/to/res014089 /absolute/path/to/output 2022.3.62f1
 ```
-"extract", "export", "exportRaw", "dump", "info", "live2d", "splitObjects", "animator"
-```
+
+Integration checks the fixture's four textures, PNG dimensions and decompressed data, state reset, literal paths, overwrite failures, cancellation, timeout and concurrent instances. Set `ASSET_STUDIO_TEST_UNITY_VERSION` to override the default 2022.3.62f1. The fixture is not committed, and test outputs are temporary.
+
+Upstream source/license and local changes: `bridge/vendor/AssetStudioCLI/README.md`.
