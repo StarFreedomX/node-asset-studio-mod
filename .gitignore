@@ -13,3 +13,5 @@
 /pnpm-workspace.yaml
 /scripts/benchmark/
 /reports/benchmark-*
+/tests/bridge/
+/bridge/
