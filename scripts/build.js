@@ -1,0 +1,160 @@
+import { build } from "esbuild";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { readFile, mkdir, copyFile, rm } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const root = fileURLToPath(new URL("../", import.meta.url));
+const require = createRequire(import.meta.url);
+await rm(path.join(root, "dist"), { recursive: true, force: true });
+const tsc = spawnSync(
+  process.execPath,
+  [require.resolve("typescript/lib/tsc.js")],
+  { cwd: root, stdio: "inherit" },
+);
+if (tsc.status !== 0) process.exit(tsc.status ?? 1);
+await build({
+  entryPoints: [
+    path.join(root, "src/engine.ts"),
+    path.join(root, "src/texture-engine.ts"),
+  ],
+  outdir: path.join(root, "dist"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  external: ["./types.js"],
+  plugins: [
+    {
+      name: "unityfs-node-adapter",
+      setup(b) {
+        b.onLoad({ filter: /unityfs-js[\\/]index\.js$/ }, async (args) => ({
+          // The upstream synchronous loader races asynchronous codec startup.
+          contents:
+            (await readFile(args.path, "utf8")) +
+            `
+       import { getLz4BlockWASM, getLzmaBlockWASM } from './wasm/wasmDecoders.js';
+       import { DecoderManager } from './decoders/DecoderManager.js';
+       import { decodeAstcRgba } from ${JSON.stringify(path.join(root, "src/texture-codecs.ts"))};
+       for (const block of [4, 5, 6, 8, 10, 12]) {
+         for (const channels of ['rgb', 'rgba']) {
+           DecoderManager.registerTextureDecoder('astc_' + channels + '_' + block + 'x' + block,
+             (data, width, height) => decodeAstcRgba(data, width, height, block));
+         }
+       }
+       if ((await Promise.all([getLz4BlockWASM(), getLzmaBlockWASM()])).some(codec => !codec)) {
+         throw new Error('Could not initialize bundled compression codecs');
+       }
+     `,
+          loader: "js",
+        }));
+        b.onLoad(
+          { filter: /unityfs[\\/]bundleFile[\\/]reader\.js$/ },
+          async (args) => {
+            const contents = await readFile(args.path, "utf8");
+            const old = "bundleFile.readers = []";
+            if (!contents.includes(old))
+              throw Error("Bundle extraction adapter needs review");
+            return {
+              contents: contents.replace(
+                old,
+                `bundleFile.assetManager = manager
+            if (bundleFile.options.nodeExtractOnly) return
+            ${old}`,
+              ),
+              loader: "js",
+            };
+          },
+        );
+        b.onLoad(
+          { filter: /unityfs[\\/]classes[\\/]assetBundle\.js$/ },
+          async (args) => {
+            const contents = (await readFile(args.path, "utf8")).replaceAll(
+              "\r\n",
+              "\n",
+            );
+            const start = contents.indexOf(
+              "    getContainer = function (objectInfo) {",
+            );
+            const end = contents.indexOf("\n}\n", start);
+            if (start < 0 || end < 0)
+              throw Error("AssetBundle container adapter needs review");
+            return {
+              contents:
+                `import { buildContainerMap } from ${JSON.stringify(path.join(root, "src/containers.ts"))};\n` +
+                contents.slice(0, start) +
+                `
+            getContainer(objectInfo) {
+              this.containerMap ??= buildContainerMap(this.preloadTable, this.container);
+              return this.containerMap.get(objectInfo.pathID);
+            }
+          ` +
+                contents.slice(end),
+              loader: "js",
+            };
+          },
+        );
+        // Our outer Node Worker provides concurrency; the upstream browser pool is unused.
+        b.onResolve({ filter: /\?worker&inline$/ }, () => ({
+          path: "browser-worker-disabled",
+          namespace: "node-adapter",
+        }));
+        b.onLoad({ filter: /.*/, namespace: "node-adapter" }, () => ({
+          contents: "export default undefined;",
+          loader: "js",
+        }));
+        // FMOD needs a separately licensed external runtime. Keep only the
+        // bundled JS PCM/Vorbis/MPEG paths and fail explicitly for its fallback.
+        b.onLoad({ filter: /vendor[\\/]fmod[\\/]fmod\.js$/ }, () => ({
+          contents: `export default async function () {
+            throw Object.assign(new Error('FMOD audio fallback is unavailable'), { code: 'UNSUPPORTED_OPERATION' });
+          }`,
+          loader: "js",
+        }));
+        b.onLoad({ filter: /fsb5[\\/]fsb5\.js$/ }, async (args) => {
+          const contents = await readFile(args.path, "utf8");
+          const old = "return this.getAudioFMOD()";
+          if (!contents.includes(old))
+            throw Error("unityfs-js audio adapter needs review");
+          return {
+            contents: contents.replace(
+              old,
+              `throw Object.assign(new Error('This audio format requires the unavailable FMOD fallback'), { code: 'UNSUPPORTED_OPERATION' })`,
+            ),
+            loader: "js",
+          };
+        });
+        b.onLoad(
+          { filter: /unityfs[\\/]assetFile[\\/]model\.js$/ },
+          async (args) => {
+            let contents = (await readFile(args.path, "utf8")).replaceAll(
+              "\r\n",
+              "\n",
+            );
+            const old =
+              "console.error(`While parsing type ${this.getClassName()}:`)\n                    console.error(e)\n                    this.cachedObject = {}";
+            if (!contents.includes(old))
+              throw Error("unityfs-js parser adapter needs review");
+            // Upstream otherwise turns malformed objects into empty objects and hides the failure.
+            return { contents: contents.replace(old, "throw e"), loader: "js" };
+          },
+        );
+      },
+    },
+  ],
+  logLevel: "warning",
+});
+await mkdir(path.join(root, "dist/licenses"), { recursive: true });
+await copyFile(
+  path.join(root, "node_modules/unityfs-js/LICENSE"),
+  path.join(root, "dist/licenses/unityfs-js-LICENSE"),
+);
+
+await copyFile(
+  path.join(root, "vendor/astc/LICENSE"),
+  path.join(root, "dist/licenses/astc-LICENSE"),
+);
+await copyFile(
+  path.join(root, "vendor/astc/fp16.h"),
+  path.join(root, "dist/licenses/astc-fp16-LICENSE.txt"),
+);

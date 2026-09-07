@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/K0lb3/texture2ddecoder",
+  "revision": "3ebc3b758bd6b1a3108b50148f7998ee34f058c6",
+  "compiler": "Emscripten 4.0.15",
+  "files": {
+    "astc.cpp": "d33c71085e724d13b7e00c7ee1c6157e37d0c0e6e070c7f11a401dd742794fc2",
+    "astc.h": "5772519a19614570d7ceefa0d65d0062d4e14db64d77401217f482775c33f368",
+    "color.h": "30fd0d50d1e627f504ccb9ec4fb390da6bb75bea88175d24ea11cd4026cec42f",
+    "endianness.h": "0ef71764093b0214465f9c6e9de0f1ea345e1fb1b3f8a6197a21bcfb92051847",
+    "fp16.h": "a65a3aeb01a098456af8291ef5d6b320efb274c72ff5df33231b96fc134d5dde",
+    "fp16/fp16.h": "19df56ac63fce04ccc582fe7d9d95b74390b44d99c2bba60f8f9105797201528",
+    "fp16/bitcasts.h": "6e3e06e7bb5ec3242c25c45db75c9aa32b9ef42ef5c4c201cf4ca04087da4a41"
+  },
+  "generatedDecoderSha256": "fa3952614c9adefd73fa30f6d8ee7baec8f530d4071985524c09cbc6bf312e80",
+  "interfaceSha256": "c3c4a84bad3f7f8a31cb9e428f38d392862b1a4e647822b060d6f8540dc37d0a"
+}

@@ -1,0 +1,22 @@
+{
+  "card_after_training.png": {
+    "width": 1334,
+    "height": 1002,
+    "rgbaSha256": "caba7c590b128a2a928b511b10a5d1649f45bfe44e31f8dfef38b68477c4614c"
+  },
+  "card_normal.png": {
+    "width": 1334,
+    "height": 1002,
+    "rgbaSha256": "4150fc70634a706d5e22abb89bfc181fdb07ecd890921323d9818be755f868d1"
+  },
+  "trim_after_training.png": {
+    "width": 1024,
+    "height": 1024,
+    "rgbaSha256": "54357f26f23843e6b0902ed5735bfc6df8a4ca47ea1e61541d7591d1fda68cce"
+  },
+  "trim_normal.png": {
+    "width": 1024,
+    "height": 1024,
+    "rgbaSha256": "6fb81ef2d6a8c623d9a40190440bf0ca3e4b0f52214ebc4f402e6f877b6277d4"
+  }
+}

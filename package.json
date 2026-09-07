@@ -1,7 +1,7 @@
 {
   "name": "node-asset-studio-mod",
   "version": "1.0.3",
-  "description": "Controlled Node.js pipe API for linked AssetStudioMod libraries",
+  "description": "Unity asset inspection and export in Node.js worker threads with JavaScript/WASM; no .NET runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -9,25 +9,20 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc && node scripts/build-bridge.js",
-    "build:ts": "tsc",
-    "setup:bridge": "node scripts/setup-bridge.js --force",
-    "postinstall": "node scripts/setup-bridge.js",
+    "build": "node scripts/build.js",
     "prepack": "npm run build",
-    "test": "npm run build:ts && node --test tests/*.test.mjs",
-    "test:integration": "npm run build:ts && node --test tests/integration.mjs",
-    "pub": "pnpm publish"
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:integration": "npm run build && node --test tests/integration.mjs",
+    "pub": "pnpm publish",
+    "test:package": "npm run build && node --test tests/package.mjs",
+    "build:astc": "node scripts/build-astc.js"
   },
   "files": [
     "dist",
-    "scripts",
-    "bridge/Program.cs",
-    "bridge/Options.cs",
-    "bridge/vendor",
-    "bridge/AssetStudioBridge.csproj",
-    "bin/bridge",
+    "scripts/export-assets.js",
     "readme.md",
-    "readme_CN.md"
+    "readme_CN.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "exports": {
     ".": {
@@ -39,12 +34,10 @@
   "author": "StarFreedomX",
   "license": "MIT",
   "packageManager": "pnpm@10.20.0",
-  "dependencies": {
-    "@types/node": "^24.10.1",
-    "dotenv": "^17.2.3",
-    "unzipper": "^0.12.3"
-  },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@types/node": "^24.10.1",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3",
+    "unityfs-js": "0.2.8"
   }
 }

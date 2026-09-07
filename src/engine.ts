@@ -1,0 +1,674 @@
+import type { TextureJob } from "./texture-engine.js";
+import { load, type AssetManager, type ObjectInfo } from "unityfs-js";
+import { processLive2DModel } from "unityfs-js/exporters/live2dExporter.js";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  AssetStudioError,
+  AssetTypes,
+  type AssetInfo,
+  type AssetResult,
+  type AssetEvent,
+  type AssetInput,
+  type ExportAssetsDefaultConfig,
+} from "./types.js";
+
+// Internal export for bundled-codec regression tests; not part of the package API.
+export { decodeAstcRgba } from "./texture-codecs.js";
+
+type Config = ExportAssetsDefaultConfig;
+export interface EngineRequest {
+  id: string;
+  method: "inspect" | "export" | "read";
+  input: AssetInput;
+  output?: string;
+  config: Config;
+}
+const classes: Record<string, string> = {
+  tex2d: "Texture2D",
+  tex2dArray: "Texture2DArray",
+  sprite: "Sprite",
+  textasset: "TextAsset",
+  monobehaviour: "MonoBehaviour",
+  font: "Font",
+  shader: "Shader",
+  movietexture: "MovieTexture",
+  audio: "AudioClip",
+  video: "VideoClip",
+  mesh: "Mesh",
+  animator: "Animator",
+};
+const exportClasses = new Set([
+  "Texture2D",
+  "Sprite",
+  "TextAsset",
+  "MonoBehaviour",
+  "Font",
+  "AudioClip",
+  "Mesh",
+  "VideoClip",
+]);
+const options = new Set([
+  "mode",
+  "assetType",
+  "group",
+  "filenameFormat",
+  "overwrite",
+  "imageFormat",
+  "audioFormat",
+  "unityVersion",
+  "filterByName",
+  "filterByContainer",
+  "filterByPathID",
+  "filterByText",
+  "filterWithRegex",
+  "logLevel",
+  "logOutput",
+  "notRestoreExtension",
+  "maxInputBytes",
+  "maxOutputBytes",
+  "maxTexturePixels",
+  "maxExportTasks",
+  "resourceFiles",
+]);
+function fail(code: string, message: string): never {
+  throw new AssetStudioError(code, message);
+}
+function validate(c: Config) {
+  for (const k of Object.keys(c))
+    if (!options.has(k))
+      fail(
+        "UNSUPPORTED_OPTION",
+        `Option ${k} is not supported by the JavaScript engine`,
+      );
+  const oneOf = (key: string, value: unknown, values: unknown[]) => {
+    if (value !== undefined && !values.includes(value))
+      fail("INVALID_CONFIG", `Unsupported ${key}: ${String(value)}`);
+  };
+  oneOf("mode", c.mode, [
+    "info",
+    "export",
+    "exportRaw",
+    "dump",
+    "extract",
+    "live2d",
+  ]);
+  oneOf("group", c.group, [
+    "none",
+    "type",
+    "container",
+    "containerFull",
+    "fileName",
+  ]);
+  oneOf("filenameFormat", c.filenameFormat, [
+    "assetName",
+    "assetName_pathID",
+    "pathID",
+  ]);
+  oneOf("imageFormat", c.imageFormat, ["png", "none"]);
+  oneOf("audioFormat", c.audioFormat, ["none", "wav"]);
+  oneOf("logLevel", c.logLevel, [
+    "verbose",
+    "debug",
+    "info",
+    "warning",
+    "error",
+  ]);
+  oneOf("logOutput", c.logOutput, ["console"]);
+  for (const key of ["overwrite", "filterWithRegex", "notRestoreExtension"])
+    if (c[key] !== undefined && typeof c[key] !== "boolean")
+      fail("INVALID_CONFIG", `${key} must be boolean`);
+  for (const key of [
+    "filterByName",
+    "filterByContainer",
+    "filterByPathID",
+    "filterByText",
+  ])
+    if (c[key] !== undefined && typeof c[key] !== "string")
+      fail("INVALID_CONFIG", `${key} must be a string`);
+  if (
+    c.unityVersion !== undefined &&
+    (typeof c.unityVersion !== "string" ||
+      !/^\d+\.\d+\.\d+[abfp]\d+(?:\w*)$/.test(c.unityVersion))
+  )
+    fail(
+      "INVALID_CONFIG",
+      "unityVersion must be a full version such as 2022.3.62f1",
+    );
+  if (
+    c.maxExportTasks !== undefined &&
+    (!Number.isInteger(c.maxExportTasks) ||
+      c.maxExportTasks < 1 ||
+      c.maxExportTasks > 64)
+  )
+    fail(
+      "INVALID_CONFIG",
+      "maxExportTasks must be an integer between 1 and 64",
+    );
+  const types = Array.isArray(c.assetType)
+    ? c.assetType
+    : [c.assetType ?? "all"];
+  if (
+    !types.length ||
+    types.some((t) => !AssetTypes.includes(t)) ||
+    (types.includes("all") && types.length > 1)
+  )
+    fail("INVALID_CONFIG", "Invalid assetType selection");
+  for (const key of ["maxInputBytes", "maxOutputBytes", "maxTexturePixels"])
+    if (c[key] !== undefined && (!Number.isSafeInteger(c[key]) || c[key] <= 0))
+      fail("INVALID_CONFIG", `${key} must be a positive safe integer`);
+  if (
+    c.resourceFiles !== undefined &&
+    (c.resourceFiles === null ||
+      typeof c.resourceFiles !== "object" ||
+      Object.values(c.resourceFiles).some((v) => !(v instanceof Uint8Array)))
+  )
+    fail(
+      "INVALID_CONFIG",
+      "resourceFiles must map filenames to Uint8Array values",
+    );
+}
+function json(value: unknown): Buffer {
+  return Buffer.from(
+    JSON.stringify(
+      value,
+      (_, v) => (typeof v === "bigint" ? v.toString() : v),
+      2,
+    ),
+  );
+}
+function bytes(value: unknown): Buffer {
+  if (typeof value === "string") return Buffer.from(value);
+  if (value instanceof Uint8Array)
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  fail("ASSET_PROCESSING_ERROR", "Exporter did not return binary data");
+}
+function relative(value: string): string {
+  if (!value || path.isAbsolute(value) || /^[a-zA-Z]:/.test(value))
+    fail("UNSAFE_PATH", `Invalid asset output path: ${value}`);
+  const parts = value.replaceAll("\\", "/").split("/");
+  if (parts.some((p) => p === ".." || p === "." || !p || p.includes("\0")))
+    fail("UNSAFE_PATH", `Unsafe asset output path: ${value}`);
+  return parts.join("/");
+}
+function name(value: string): string {
+  const result = value
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/[. ]+$/, "");
+  return result && result !== "." && result !== ".." ? result : "unnamed";
+}
+function safeWrite(
+  root: string,
+  relativePath: string,
+  data: Buffer,
+  overwrite: boolean,
+) {
+  // Resolve the caller-selected root (macOS /var and /tmp are symlinks), then
+  // reject symlink components introduced by asset-controlled relative paths.
+  fs.mkdirSync(root, { recursive: true });
+  root = fs.realpathSync(root);
+  const target = path.join(root, relative(relativePath));
+  const parts = path
+    .relative(root, path.dirname(target))
+    .split(path.sep)
+    .filter(Boolean);
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    if (fs.existsSync(current)) {
+      if (fs.lstatSync(current).isSymbolicLink())
+        fail("UNSAFE_PATH", `Symlink output directory: ${current}`);
+    } else fs.mkdirSync(current);
+  }
+  const flags =
+    fs.constants.O_WRONLY |
+    fs.constants.O_CREAT |
+    (overwrite ? fs.constants.O_TRUNC : fs.constants.O_EXCL) |
+    (fs.constants.O_NOFOLLOW ?? 0);
+  const fd = fs.openSync(target, flags);
+  try {
+    fs.writeFileSync(fd, data);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+function match(info: AssetInfo, c: Config): boolean {
+  const test = (value: string, filter: string) =>
+    c.filterWithRegex
+      ? new RegExp(filter, "i").test(value)
+      : filter
+          .split(/[,;]/)
+          .some((f) => value.toLowerCase().includes(f.toLowerCase()));
+  if (c.filterByText)
+    return (
+      test(info.name, c.filterByText) || test(info.container, c.filterByText)
+    );
+  if (c.filterByPathID)
+    return c.filterByPathID.split(/[,;]/).some((f) => info.pathId.includes(f));
+  return (
+    (!c.filterByName || test(info.name, c.filterByName)) &&
+    (!c.filterByContainer || test(info.container, c.filterByContainer))
+  );
+}
+function outputName(info: AssetInfo, ext: string, c: Config) {
+  const file =
+    c.filenameFormat === "pathID"
+      ? info.pathId
+      : c.filenameFormat === "assetName_pathID"
+        ? `${info.name} @${info.pathId}`
+        : info.name;
+  let dir = "";
+  if (c.group === "type") dir = info.type;
+  else if (c.group === "fileName") dir = name(info.source) + "_export";
+  else if (c.group !== "none" && info.container) {
+    dir = path.posix.dirname(info.container);
+    if (dir === ".") dir = "";
+    if (c.group === "containerFull")
+      dir = path.posix.join(dir, path.posix.parse(info.container).name);
+  }
+  return relative((dir ? dir + "/" : "") + name(file) + ext);
+}
+
+export async function execute(
+  request: EngineRequest,
+  emit: (event: AssetEvent) => void,
+  encodeTexture?: (job: TextureJob) => Promise<Uint8Array>,
+): Promise<AssetResult> {
+  const { id, config: c } = request;
+  validate(c);
+  const mode = request.method === "inspect" ? "info" : (c.mode ?? "export");
+  const maxInput = c.maxInputBytes ?? 512 * 1024 * 1024,
+    maxOutput =
+      c.maxOutputBytes ??
+      (request.method === "read" ? 512 * 1024 * 1024 : 16 * 1024 * 1024 * 1024),
+    maxPixels = c.maxTexturePixels ?? 64 * 1024 * 1024;
+  let inputBytes = 0,
+    outputBytes = 0,
+    exportedCount = 0,
+    extractedSerializedFiles = 0;
+  const managers: AssetManager[] = [],
+    sources = new Map<ObjectInfo, string>(),
+    assets: AssetInfo[] = [],
+    files: { path: string; data: Uint8Array }[] = [],
+    written = new Set<string>();
+  const progress = (
+    phase: "load" | "parse" | "export" | "extract",
+    completed: number,
+    total: number,
+  ) =>
+    emit({
+      type: "progress",
+      id,
+      phase,
+      completed,
+      total,
+      percent: total ? Math.floor((completed * 100) / total) : 100,
+    });
+  const charge = (n: number) => {
+    inputBytes += n;
+    if (inputBytes > maxInput)
+      fail(
+        "LIMIT_EXCEEDED",
+        "Input and companion resources exceed maxInputBytes",
+      );
+  };
+  const read = (p: string) => {
+    const stat = fs.statSync(p);
+    if (!stat.isFile()) fail("INVALID_INPUT", `Not a file: ${p}`);
+    charge(stat.size);
+    return fs.readFileSync(p);
+  };
+  const emitFile = (p: string, value: unknown) => {
+    const data = bytes(value);
+    p = relative(p);
+    outputBytes += data.length;
+    if (outputBytes > maxOutput)
+      fail("LIMIT_EXCEEDED", "Output exceeds maxOutputBytes");
+    if (written.has(p))
+      fail(
+        "ASSET_PROCESSING_ERROR",
+        `Duplicate output name ${p}; use filenameFormat: assetName_pathID`,
+      );
+    written.add(p);
+    if (request.method === "read")
+      files.push({ path: p, data: Uint8Array.from(data) });
+    else safeWrite(request.output!, p, data, c.overwrite ?? false);
+  };
+  const pendingTextures = new Map<
+    number,
+    Promise<{ data?: Uint8Array; error?: unknown }>
+  >();
+  try {
+    const inputs: { name: string; data?: Uint8Array; file?: string }[] = [];
+    if (typeof request.input === "string") {
+      const walk = (p: string) => {
+        const st = fs.lstatSync(p);
+        if (st.isSymbolicLink())
+          fail("INVALID_INPUT", `Symlink input is not supported: ${p}`);
+        if (st.isDirectory()) {
+          for (const f of fs.readdirSync(p).sort()) walk(path.join(p, f));
+        } else if (st.isFile() && !/\.(resS|resource)$/i.test(p)) {
+          inputs.push({ name: path.basename(p), file: p });
+          if (inputs.length > 10000)
+            fail("LIMIT_EXCEEDED", "Input contains too many files");
+        }
+      };
+      walk(request.input);
+    } else
+      inputs.push({
+        name: "memory.bundle",
+        data:
+          request.input instanceof ArrayBuffer
+            ? new Uint8Array(request.input)
+            : request.input,
+      });
+    progress("load", 0, inputs.length);
+    for (let i = 0; i < inputs.length; i++) {
+      const item = inputs[i],
+        data = item.file ? read(item.file) : item.data!;
+      if (!item.file) charge(data.byteLength);
+      // load() upstream ignores byteOffset on Uint8Array; supply an exact ArrayBuffer.
+      const m = await load(
+        data.buffer.slice(
+          data.byteOffset,
+          data.byteOffset + data.byteLength,
+        ) as ArrayBuffer,
+        {
+          unityRevision: c.unityVersion,
+          nodeExtractOnly: mode === "extract",
+        } as any,
+      );
+      if (mode === "extract" && m) {
+        // Extraction only needs archive nodes: avoid parsing objects and retain
+        // at most one bundle, even when the caller passes an entire directory.
+        try {
+          const nodes = m.bundleFile?.files;
+          if (!nodes?.length)
+            fail("UNSUPPORTED_OPERATION", "extract requires a Unity bundle");
+          for (const n of nodes) {
+            emitFile(n.node.path, n.data);
+            exportedCount++;
+            if (n.node.flags & 4) extractedSerializedFiles++;
+          }
+        } finally {
+          m.dispose();
+        }
+        progress("extract", i + 1, inputs.length);
+        continue;
+      }
+      if (!m || !m.assetFiles?.length) {
+        m?.dispose();
+        fail(
+          "ASSET_PROCESSING_ERROR",
+          `No Unity serialized files could be loaded from ${item.name}`,
+        );
+      }
+      managers.push(m);
+      for (const [key, value] of Object.entries(c.resourceFiles ?? {})) {
+        charge(value.byteLength);
+        m.registerResourceFile(key, value);
+      }
+      // Discover only same-directory companion resources; resource paths never trigger network requests.
+      if (item.file)
+        for (const filename of fs
+          .readdirSync(path.dirname(item.file))
+          .filter((f) => /\.(resS|resource)$/i.test(f)))
+          m.registerResourceFile(
+            filename,
+            read(path.join(path.dirname(item.file), filename)),
+          );
+      for (const o of m.getObjectInfos())
+        sources.set(
+          o,
+          m.bundleFile?.files?.find((f) => f.assetFile === o.assetFile)?.node
+            ?.path ?? item.name,
+        );
+      progress("load", i + 1, inputs.length);
+    }
+    if (!inputs.length)
+      fail(
+        "ASSET_PROCESSING_ERROR",
+        "No Unity serialized files could be loaded",
+      );
+    if (mode !== "extract") {
+      const requested = Array.isArray(c.assetType)
+        ? c.assetType
+        : [c.assetType ?? "all"];
+      const selectedClasses = requested.includes("all")
+        ? Object.values(classes)
+        : requested.map((t) => classes[t]);
+      const selected: {
+        manager: AssetManager;
+        object: ObjectInfo;
+        info: AssetInfo;
+      }[] = [];
+      for (const m of managers)
+        for (const o of m.getObjectInfos())
+          if (selectedClasses.includes(o.className)) {
+            const object = o.object; // Patched upstream getter throws instead of replacing failed objects with {}.
+            const container = m.getContainer(o) as any;
+            const streamSize = Number(object?.streamData?.size ?? 0);
+            const info: AssetInfo = {
+              name: o.name,
+              type: o.className,
+              pathId: o.pathID.toString(),
+              container: container?.key ?? "",
+              size: o.size + streamSize,
+              source: sources.get(o)!,
+            };
+            if (match(info, c)) {
+              assets.push(info);
+              selected.push({ manager: m, object: o, info });
+            }
+          }
+      const concurrency = c.maxExportTasks ?? 4;
+      const textureIndices =
+        mode === "export" &&
+        c.imageFormat !== "none" &&
+        concurrency > 1 &&
+        encodeTexture
+          ? selected.flatMap((s, i) => (s.info.type === "Texture2D" ? [i] : []))
+          : [];
+      let nextTexture = 0;
+      const scheduleTexture = () => {
+        const index = textureIndices[nextTexture++];
+        if (index === undefined) return;
+        // Capture errors as values immediately; later failures cannot reject unobserved.
+        const task = (async () => {
+          const { manager: m, object: o, info } = selected[index],
+            obj = o.object;
+          if (
+            !Number.isSafeInteger(obj.width) ||
+            !Number.isSafeInteger(obj.height) ||
+            obj.width <= 0 ||
+            obj.height <= 0 ||
+            obj.width * obj.height > maxPixels
+          )
+            fail(
+              "LIMIT_EXCEEDED",
+              `Invalid or excessive texture dimensions: ${info.name}`,
+            );
+          const data = obj.data?.length
+            ? obj.data
+            : obj.streamData
+              ? m.resolveResource(
+                  obj.streamData.path,
+                  obj.streamData.offset,
+                  obj.streamData.size,
+                )
+              : null;
+          if (!data)
+            fail(
+              "ASSET_PROCESSING_ERROR",
+              `Missing texture data: ${info.name}`,
+            );
+          return {
+            data: await encodeTexture!({
+              data: Uint8Array.from(data),
+              width: obj.width,
+              height: obj.height,
+              format: obj.textureFormat,
+              version: obj._version,
+            }),
+          };
+        })().catch((error) => ({ error }));
+        pendingTextures.set(index, task);
+      };
+      for (let n = 0; n < Math.min(concurrency, textureIndices.length); n++)
+        scheduleTexture();
+      progress("parse", selected.length, selected.length);
+      if (mode !== "info")
+        for (let i = 0; i < selected.length; i++) {
+          const { manager: m, object: o, info } = selected[i];
+          if (pendingTextures.has(i)) {
+            const result = await pendingTextures.get(i)!;
+            pendingTextures.delete(i);
+            if (result.error) throw result.error;
+            emitFile(outputName(info, ".png", c), result.data);
+            exportedCount++;
+            progress("export", i + 1, selected.length);
+            scheduleTexture();
+            continue;
+          }
+          if (mode === "live2d") {
+            if (o.className !== "MonoBehaviour") continue;
+            const script = o.object.script;
+            if (
+              !script ||
+              m.getObjectInfoByPathId(BigInt(script.pathID))?.object
+                ?.className !== "CubismModel"
+            )
+              continue;
+            const model = await processLive2DModel(o, m);
+            for (const [p, data] of Object.entries(model.files))
+              emitFile(relative(name(model.name) + "/" + p), data);
+          } else if (mode === "exportRaw")
+            emitFile(outputName(info, ".bin", c), o.serialize());
+          else if (mode === "dump") {
+            const tree = o.assetFile!.getObjectUsingTreeJSON(o);
+            if (tree === null || tree === undefined)
+              fail("UNSUPPORTED_OPERATION", `No TypeTree for ${info.name}`);
+            emitFile(outputName(info, ".json", c), json(tree));
+          } else {
+            if (!exportClasses.has(info.type))
+              fail(
+                "UNSUPPORTED_OPERATION",
+                `Conversion of ${info.type} is not supported; use exportRaw or dump`,
+              );
+            const obj = o.object;
+            if (info.type === "Texture2D") {
+              if (
+                !Number.isSafeInteger(obj.width) ||
+                !Number.isSafeInteger(obj.height) ||
+                obj.width <= 0 ||
+                obj.height <= 0 ||
+                obj.width * obj.height > maxPixels
+              )
+                fail(
+                  "LIMIT_EXCEEDED",
+                  `Invalid or excessive texture dimensions: ${info.name}`,
+                );
+              if (c.imageFormat === "none") {
+                const data = obj.data?.length
+                  ? obj.data
+                  : obj.streamData
+                    ? m.resolveResource(
+                        obj.streamData.path,
+                        obj.streamData.offset,
+                        obj.streamData.size,
+                      )
+                    : null;
+                if (!data)
+                  fail(
+                    "ASSET_PROCESSING_ERROR",
+                    `Missing texture data: ${info.name}`,
+                  );
+                emitFile(outputName(info, ".tex", c), data);
+                exportedCount++;
+                progress("export", i + 1, selected.length);
+                continue;
+              }
+            }
+            let data: unknown, extension: string;
+            if (info.type === "TextAsset") {
+              data = obj.data;
+              extension = c.notRestoreExtension
+                ? ".txt"
+                : path.posix.extname(info.container) || ".txt";
+            } else if (info.type === "Font") {
+              data = obj.fontData;
+              extension =
+                bytes(data).subarray(0, 4).toString() === "OTTO"
+                  ? ".otf"
+                  : ".ttf";
+            } else if (info.type === "VideoClip") {
+              const r = obj.externalResources;
+              data = m.resolveResource(r.source, r.offset, r.size);
+              extension = path.extname(obj.originalPath) || ".mp4";
+            } else {
+              const result = await m.exportFile(o, {
+                type: "arrayBuffer",
+                worker: false,
+                encoder: "wasm",
+              });
+              if (!result || result.error)
+                fail(
+                  "ASSET_PROCESSING_ERROR",
+                  result?.error ?? `Could not export ${info.name}`,
+                );
+              if (result.isFolder) {
+                for (const [p, data] of Object.entries(result.files))
+                  emitFile(relative(name(result.name) + "/" + p), data);
+                exportedCount++;
+                continue;
+              }
+              data = result.data?.raw;
+              extension =
+                info.type === "Texture2D" || info.type === "Sprite"
+                  ? ".png"
+                  : info.type === "Mesh"
+                    ? ".obj"
+                    : info.type === "MonoBehaviour"
+                      ? ".json"
+                      : "." + (result.fileType ?? "bin");
+              if (
+                info.type === "AudioClip" &&
+                c.audioFormat === "wav" &&
+                extension !== ".wav"
+              )
+                fail(
+                  "UNSUPPORTED_OPERATION",
+                  `Audio decoder produced ${extension}, not WAV`,
+                );
+            }
+            if (!bytes(data).length)
+              fail(
+                "ASSET_PROCESSING_ERROR",
+                `Empty exported data: ${info.name}`,
+              );
+            emitFile(outputName(info, extension, c), data);
+            // Other objects can decode again if they reference this texture.
+            // Keeping every decoded bitmap makes directory exports grow unbounded.
+            if (info.type === "Texture2D") obj.cachedRaw = null;
+          }
+          exportedCount++;
+          progress("export", i + 1, selected.length);
+        }
+    }
+    return {
+      loadedFiles:
+        extractedSerializedFiles +
+        managers.reduce((n, m) => n + m.assetFiles.length, 0),
+      assetCount: assets.length,
+      exportedCount,
+      output:
+        request.method === "export" && mode !== "info" ? request.output! : null,
+      assets,
+      ...(request.method === "read" ? { files } : {}),
+    };
+  } finally {
+    await Promise.allSettled(pendingTextures.values());
+    for (const m of managers) m.dispose();
+  }
+}
