@@ -1,4 +1,4 @@
-# node-asset-studio-mod
+# node-asset-studio-mod-js
 
 在 Node.js 中检查和导出 Unity 资源。解析引擎已替换为 [unityfs-js 0.2.8](https://github.com/bainiao404/unityfs-js)，运行时仅使用 JavaScript 和随包内嵌的 WebAssembly，不包含 .NET，不启动 AssetStudio CLI，也不下载外部运行时。
 
@@ -8,7 +8,7 @@
 
 ```js
 import { readFile } from "node:fs/promises";
-import { readAssets } from "node-asset-studio-mod";
+import { readAssets } from "node-asset-studio-mod-js";
 
 const input = await readFile("/Users/bytedance/Downloads/res014089");
 const result = await readAssets(input, {
@@ -32,7 +32,7 @@ for (const { path, data } of result.files) {
 ## 检查、导出和控制生命周期
 
 ```js
-import { createExporter } from "node-asset-studio-mod";
+import { createExporter } from "node-asset-studio-mod-js";
 
 const exporter = createExporter({ unityVersion: "2022.3.62f1", log: false });
 const controller = new AbortController();
@@ -119,3 +119,18 @@ try {
 ```
 
 同一实例会复用 codec Worker；每次请求可覆盖并发数，调整时会清理旧池。取消、超时及 `close()` 会等待解析和 codec Worker 全部退出。`inspect`、`extract`、原始纹理输出和其它资源转换仍使用原有路径，不会为它们创建 codec Worker。codec Worker 只处理内存，不直接写文件或访问网络。
+
+## 构建与发布
+
+构建和运行需要 Node.js 22+；仓库已有 WASM 解码器，不需要 .NET 或 C++ 编译器。
+
+```sh
+npm install --ignore-scripts
+npm run build
+npm test
+npm pack
+# 检查生成的压缩包后再发布：
+npm publish ./node-asset-studio-mod-js-0.1.0.tgz --access public
+```
+
+`npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。多个实现建议使用独立检出目录：Git 切换分支不会切换已安装依赖和下载的运行时文件。

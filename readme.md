@@ -1,4 +1,4 @@
-# node-asset-studio-mod
+# node-asset-studio-mod-js
 
 Inspect and export Unity assets in Node.js using [unityfs-js 0.2.8](https://github.com/bainiao404/unityfs-js). The runtime is JavaScript and embedded WebAssembly: no .NET, AssetStudio CLI, subprocess, runtime downloads, npm runtime dependencies, or install scripts. Requires Node.js 22+ and ESM.
 
@@ -8,7 +8,7 @@ Inspect and export Unity assets in Node.js using [unityfs-js 0.2.8](https://gith
 
 ```js
 import { readFile } from "node:fs/promises";
-import { readAssets } from "node-asset-studio-mod";
+import { readAssets } from "node-asset-studio-mod-js";
 
 const result = await readAssets(await readFile("/path/to/res014089"), {
   unityVersion: "2022.3.62f1",
@@ -30,7 +30,7 @@ For standalone serialized assets, pass companions with `resourceFiles: { 'name.r
 ## Reuse and control
 
 ```js
-import { createExporter } from "node-asset-studio-mod";
+import { createExporter } from "node-asset-studio-mod-js";
 
 const exporter = createExporter({ unityVersion: "2022.3.62f1", log: false });
 const controller = new AbortController();
@@ -112,3 +112,18 @@ try {
 ```
 
 Codec workers are reused across requests and replaced when concurrency changes. Abort, timeout and close wait for both parser and codec workers to exit. Inspect, archive extraction, raw texture output and other conversions keep their existing paths. Codec workers process only memory, with no filesystem writes or network access.
+
+## Build and publish
+
+Building and running need Node.js 22+; the checked-in WASM decoder needs no .NET or C++ compiler.
+
+```sh
+npm install --ignore-scripts
+npm run build
+npm test
+npm pack
+# Run after inspecting the generated tarball:
+npm publish ./node-asset-studio-mod-js-0.1.0.tgz --access public
+```
+
+`npm pack` rebuilds through `prepack`. Use an unused package version for each release. Prefer separate checkouts when building multiple implementations; generated dependencies and runtime files are not switched by Git.

@@ -62,7 +62,7 @@ test("published package installs offline without lifecycle downloads and runs wi
       ],
       { cwd: consumer, encoding: "utf8" },
     );
-    const installed = path.join(consumer, "node_modules/node-asset-studio-mod");
+    const installed = path.join(consumer, "node_modules", pack.name);
     const manifest = JSON.parse(
       await readFile(path.join(installed, "package.json")),
     );
@@ -101,7 +101,7 @@ test("published package installs offline without lifecycle downloads and runs wi
       `
       import { readFile } from 'node:fs/promises';
       import assert from 'node:assert/strict';
-      import { readAssets } from 'node-asset-studio-mod';
+      import { readAssets } from ${JSON.stringify(pack.name)};
       import { createHash } from 'node:crypto';
       import { rgbaPng } from './png.mjs';
       const result = await readAssets(await readFile(process.env.FIXTURE), { unityVersion: '2022.3.62f1', log: false });
