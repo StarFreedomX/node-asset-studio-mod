@@ -1,6 +1,6 @@
 {
   "name": "node-asset-studio-mod-js",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Unity asset inspection and export in Node.js worker threads with JavaScript/WASM; no .NET runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,7 +22,8 @@
     "scripts/export-assets.js",
     "readme.md",
     "readme_CN.md",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "WORKTREES.md"
   ],
   "exports": {
     ".": {

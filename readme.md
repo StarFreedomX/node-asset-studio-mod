@@ -126,7 +126,7 @@ npm pack
 npm publish ./node-asset-studio-mod-js-0.1.0.tgz --access public
 ```
 
-`npm pack` rebuilds through `prepack`. Use an unused package version for each release. Prefer separate checkouts when building multiple implementations; generated dependencies and runtime files are not switched by Git.
+`npm pack` rebuilds through `prepack`. Use an unused package version for each release. Maintain the three implementations as worktrees of one Git repository; see [worktree maintenance](WORKTREES.md). Dependencies and runtime files belong to each working directory.
 
 ## Separate branch dependencies
 
