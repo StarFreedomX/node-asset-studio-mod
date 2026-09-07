@@ -1,3 +1,4 @@
+import { convertShader } from "./shader.js";
 import type { TextureJob } from "./texture-engine.js";
 import { load, type AssetManager, type ObjectInfo } from "unityfs-js";
 import { processLive2DModel } from "unityfs-js/exporters/live2dExporter.js";
@@ -39,6 +40,7 @@ const classes: Record<string, string> = {
   animator: "Animator",
 };
 const exportClasses = new Set([
+  "Shader",
   "Texture2D",
   "Sprite",
   "TextAsset",
@@ -335,6 +337,20 @@ export async function execute(
       files.push({ path: p, data: Uint8Array.from(data) });
     else safeWrite(request.output!, p, data, c.overwrite ?? false);
   };
+  const emitAssetFile = (info: AssetInfo, extension: string, data: unknown) => {
+    let target = outputName(info, extension, c);
+    // Preserve all same-name objects in default exports, as the original exporter does.
+    // Explicit PathID naming and archive entry collisions still fail rather than overwrite.
+    if (
+      written.has(target) &&
+      (!c.filenameFormat || c.filenameFormat === "assetName")
+    )
+      target = outputName(info, extension, {
+        ...c,
+        filenameFormat: "assetName_pathID",
+      });
+    emitFile(target, data);
+  };
   const pendingTextures = new Map<
     number,
     Promise<{ data?: Uint8Array; error?: unknown }>
@@ -448,9 +464,24 @@ export async function execute(
           if (selectedClasses.includes(o.className)) {
             const object = o.object; // Patched upstream getter throws instead of replacing failed objects with {}.
             const container = m.getContainer(o) as any;
+            // Match AssetStudio's names without invoking upstream's browser-only PPtr resolver.
+            let assetName = o.name;
+            if (o.className === "Shader")
+              assetName = object.parsedForm?.name || object.name || assetName;
+            else if (
+              o.className === "MonoBehaviour" &&
+              !object.name &&
+              object.script?.fileID === 0
+            ) {
+              const script = o.assetFile?.getObjectByPathID(
+                object.script.pathID,
+              );
+              if (script?.className === "MonoScript")
+                assetName = script.object.className || assetName;
+            }
             const streamSize = Number(object?.streamData?.size ?? 0);
             const info: AssetInfo = {
-              name: o.name,
+              name: assetName,
               type: o.className,
               pathId: o.pathID.toString(),
               container: container?.key ?? "",
@@ -525,7 +556,7 @@ export async function execute(
             const result = await pendingTextures.get(i)!;
             pendingTextures.delete(i);
             if (result.error) throw result.error;
-            emitFile(outputName(info, ".png", c), result.data);
+            emitAssetFile(info, ".png", result.data);
             exportedCount++;
             progress("export", i + 1, selected.length);
             scheduleTexture();
@@ -544,12 +575,12 @@ export async function execute(
             for (const [p, data] of Object.entries(model.files))
               emitFile(relative(name(model.name) + "/" + p), data);
           } else if (mode === "exportRaw")
-            emitFile(outputName(info, ".bin", c), o.serialize());
+            emitAssetFile(info, ".bin", o.serialize());
           else if (mode === "dump") {
             const tree = o.assetFile!.getObjectUsingTreeJSON(o);
             if (tree === null || tree === undefined)
               fail("UNSUPPORTED_OPERATION", `No TypeTree for ${info.name}`);
-            emitFile(outputName(info, ".json", c), json(tree));
+            emitAssetFile(info, ".json", json(tree));
           } else {
             if (!exportClasses.has(info.type))
               fail(
@@ -584,14 +615,17 @@ export async function execute(
                     "ASSET_PROCESSING_ERROR",
                     `Missing texture data: ${info.name}`,
                   );
-                emitFile(outputName(info, ".tex", c), data);
+                emitAssetFile(info, ".tex", data);
                 exportedCount++;
                 progress("export", i + 1, selected.length);
                 continue;
               }
             }
             let data: unknown, extension: string;
-            if (info.type === "TextAsset") {
+            if (info.type === "Shader") {
+              data = Buffer.from(await convertShader(obj));
+              extension = ".shader";
+            } else if (info.type === "TextAsset") {
               data = obj.data;
               extension = c.notRestoreExtension
                 ? ".txt"
@@ -647,7 +681,7 @@ export async function execute(
                 "ASSET_PROCESSING_ERROR",
                 `Empty exported data: ${info.name}`,
               );
-            emitFile(outputName(info, extension, c), data);
+            emitAssetFile(info, extension, data);
             // Other objects can decode again if they reference this texture.
             // Keeping every decoded bitmap makes directory exports grow unbounded.
             if (info.type === "Texture2D") obj.cachedRaw = null;

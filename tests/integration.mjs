@@ -365,3 +365,69 @@ test("aborting parallel export waits for parser and codec workers to stop, then 
     await ex.close();
   }
 });
+
+test(
+  "gacha1937: default all exports Shader and duplicate MonoBehaviours through memory, disk and parallel codecs",
+  { skip: !process.env.ASSET_STUDIO_TEST_SHADER_INPUT },
+  async () => {
+    const fixture = process.env.ASSET_STUDIO_TEST_SHADER_INPUT;
+    const exporter = createExporter(config),
+      temp = await mkdtemp(path.join(tmpdir(), "asset-shader-"));
+    try {
+      const serial = await exporter.readAssets(await readFile(fixture), {
+        maxExportTasks: 1,
+      });
+      assert.equal(serial.exportedCount, 13);
+      assert.equal(new Set(serial.files.map((f) => f.path)).size, 13);
+      assert.equal(
+        serial.assets.filter((a) => a.type === "MonoBehaviour").length,
+        8,
+      );
+      assert.ok(
+        serial.assets
+          .filter((a) => a.type === "MonoBehaviour")
+          .every((a) => a.name !== "<empty>"),
+      );
+      assert.ok(
+        serial.files.some((f) => /UITexture @-?\d+\.json$/.test(f.path)),
+      );
+      const shader = serial.files.find((f) => f.path.endsWith(".shader"));
+      assert.ok(shader.path.endsWith("/Unlit_Transparent Colored.shader"));
+      const text = Buffer.from(shader.data).toString();
+      assert.match(text, /Shader "Unlit\/Transparent Colored"/);
+      assert.match(text, /#ifdef VERTEX/);
+      assert.match(text, /OpEntryPoint Vertex/);
+      assert.match(text, /OpEntryPoint Fragment/);
+      assert.doesNotMatch(text, /undefined|NaN|not supported/);
+      const parallel = await exporter.readAssets(fixture, {
+        maxExportTasks: 4,
+      });
+      assert.deepEqual(parallel.files, serial.files);
+      const disk = await exporter.exportAssets(fixture, temp, {
+        maxExportTasks: 1,
+      });
+      assert.equal(disk.exportedCount, 13);
+      for (const f of serial.files)
+        assert.deepEqual(
+          await readFile(path.join(temp, f.path)),
+          Buffer.from(f.data),
+        );
+      const only = await exporter.readAssets(fixture, {
+        assetType: "shader",
+        filterByName: "Unlit/Transparent Colored",
+        filenameFormat: "pathID",
+      });
+      assert.equal(only.exportedCount, 1);
+      assert.deepEqual(only.files[0].data, shader.data);
+      const raw = await exporter.readAssets(fixture, {
+        assetType: "shader",
+        mode: "exportRaw",
+      });
+      assert.equal(raw.exportedCount, 1);
+      assert.notDeepEqual(raw.files[0].data, shader.data);
+    } finally {
+      await exporter.close();
+      await rm(temp, { recursive: true, force: true });
+    }
+  },
+);

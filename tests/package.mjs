@@ -112,6 +112,13 @@ test("published package installs offline without lifecycle downloads and runs wi
         assert.equal(astc.exportedCount,1);
         assert.equal(createHash('sha256').update(rgbaPng(Buffer.from(astc.files[0].data)).data).digest('hex'), ${JSON.stringify(astcGolden.rgbaSha256)});
       }
+      if (process.env.SHADER_FIXTURE) {
+        const shader = await readAssets(await readFile(process.env.SHADER_FIXTURE), { unityVersion:'2022.3.62f1', log:false });
+        assert.equal(shader.exportedCount,13);
+        const file=shader.files.find(f=>f.path.endsWith('.shader'));
+        assert.match(Buffer.from(file.data).toString(), /OpEntryPoint Vertex/);
+        assert.match(Buffer.from(file.data).toString(), /#ifdef VERTEX/);
+      }
       console.log(JSON.stringify({ assets: result.assetCount, pngs: result.files.length }));
     `,
     );
@@ -124,6 +131,13 @@ test("published package installs offline without lifecycle downloads and runs wi
           PATH: emptyPath,
           DOTNET_ROOT: path.join(temporary, "no-dotnet"),
           FIXTURE: path.resolve(input),
+          ...(process.env.ASSET_STUDIO_TEST_SHADER_INPUT
+            ? {
+                SHADER_FIXTURE: path.resolve(
+                  process.env.ASSET_STUDIO_TEST_SHADER_INPUT,
+                ),
+              }
+            : {}),
           ...(process.env.ASSET_STUDIO_TEST_ASTC_INPUT
             ? {
                 ASTC_FIXTURE: path.resolve(

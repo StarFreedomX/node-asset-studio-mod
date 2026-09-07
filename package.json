@@ -1,6 +1,6 @@
 {
   "name": "node-asset-studio-mod-js",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Unity asset inspection and export in Node.js worker threads with JavaScript/WASM; no .NET runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,6 +23,7 @@
     "readme.md",
     "readme_CN.md",
     "THIRD_PARTY_NOTICES.md",
+    "COMPATIBILITY.md",
     "WORKTREES.md"
   ],
   "exports": {
@@ -38,6 +39,7 @@
   "devDependencies": {
     "@types/node": "^24.10.1",
     "esbuild": "0.25.12",
+    "spirv-tools": "20.4.1",
     "typescript": "5.9.3",
     "unityfs-js": "0.2.8"
   }

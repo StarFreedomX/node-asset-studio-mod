@@ -21,7 +21,6 @@ export const engineCapabilities = Object.freeze({
     "animator",
     "FBX",
     "Texture2DArray conversion",
-    "Shader conversion",
     "MovieTexture conversion",
   ] as const,
 });

@@ -65,7 +65,7 @@ This replacement does not provide full AssetStudio feature parity.
 | Mode / feature     | Behavior                                                                                                                |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
 | `info` / `inspect` | Selected asset metadata with exact string PathIDs                                                                       |
-| `export`           | Texture2D/Sprite PNG, TextAsset, Font, Mesh OBJ, MonoBehaviour JSON, VideoClip, some AudioClip conversions              |
+| `export`           | Texture2D/Sprite PNG, ShaderLab inspection text, TextAsset, Font, Mesh OBJ, MonoBehaviour JSON, VideoClip, some AudioClip conversions              |
 | `extract`          | Bundle files including companion resources                                                                              |
 | `exportRaw`        | Serialized object bytes only; **does not append external resource streams**. Use `extract` for complete bundle contents |
 | `dump`             | JSON from embedded TypeTree; fails explicitly if unavailable                                                            |
@@ -73,11 +73,11 @@ This replacement does not provide full AssetStudio feature parity.
 | Images             | `png`, or Texture2D raw texture bytes as `.tex` with `none`                                                             |
 | Audio              | JS PCM/Vorbis/MPEG paths; FMOD fallback unavailable. `wav` does not transcode OGG/MP3                                   |
 
-Validated with `res014089`, Unity `2022.3.62f1`: four Texture2D assets produce PNGs whose decoded RGBA pixels exactly match the former .NET exports. Bundle extraction, companion resource round-trip, raw bytes and TypeTree dumps are also tested. Other asset conversions have no real-fixture coverage here and depend on the upstream engine.
+Validated with `res014089`, Unity `2022.3.62f1`: four Texture2D assets produce PNGs whose decoded RGBA pixels exactly match the former .NET exports. Bundle extraction, companion resource round-trip, raw bytes and TypeTree dumps are also tested. The garupa-unpacker migration regression additionally covers Shader, MonoBehaviour and TextAsset; see below.
 
-Removed: .NET paths and installer, C# bridge, FBX, Animator/splitObjects, Shader/MovieTexture/Texture2DArray conversion, scene grouping, external assemblies, compression overrides, old Live2D/FBX-specific options, and file logging. Unsupported options fail explicitly instead of being ignored. The TypeScript API describes the current supported configuration.
+Removed: .NET paths and installer, C# bridge, FBX, Animator/splitObjects, MovieTexture/Texture2DArray conversion, scene grouping, external assemblies, compression overrides, old Live2D/FBX-specific options, and file logging. Unsupported options fail explicitly instead of being ignored. The TypeScript API describes the current supported configuration.
 
-`assetType` accepts one type or an array; `all` means the resource types listed by this API, not every Unity object. Filters support name/container, PathID, text and regex. Text overrides PathID, which overrides name/container filters. Default grouping is `container`; alternatives are `none`, `type`, `containerFull`, `fileName`. Names can use `assetName`, `assetName_pathID`, or `pathID`. Existing files fail unless `overwrite: true`; duplicate names within a request still fail. Asset path traversal and symlink output subdirectories are rejected.
+`assetType` accepts one type or an array; `all` means the resource types listed by this API, not every Unity object. Filters support name/container, PathID, text and regex. Text overrides PathID, which overrides name/container filters. Default grouping is `container`; alternatives are `none`, `type`, `containerFull`, `fileName`. Names can use `assetName`, `assetName_pathID`, or `pathID`. Existing files fail unless `overwrite: true`; default asset-name collisions within a request append a PathID to subsequent objects; explicit ID collisions still fail. Asset path traversal and symlink output subdirectories are rejected.
 
 Default budgets: 512 MiB for input plus companions (`maxInputBytes`), 512 MiB for in-memory output or 16 GiB for disk output (`maxOutputBytes`), and 64 × 1024 × 1024 pixels per Texture2D (`maxTexturePixels`). Set positive integers to adjust. These budgets are not hard limits on overall process/WASM memory.
 
@@ -123,7 +123,7 @@ npm run build
 npm test
 npm pack
 # Run after inspecting the generated tarball:
-npm publish ./node-asset-studio-mod-js-0.1.0.tgz --access public
+npm publish ./node-asset-studio-mod-js-0.1.2.tgz --access public
 ```
 
 `npm pack` rebuilds through `prepack`. Use an unused package version for each release. Maintain the three implementations as worktrees of one Git repository; see [worktree maintenance](WORKTREES.md). Dependencies and runtime files belong to each working directory.
@@ -131,3 +131,30 @@ npm publish ./node-asset-studio-mod-js-0.1.0.tgz --access public
 ## Separate branch dependencies
 
 Use a separate worktree for CLI, pipe and JS and run `pnpm install` in each directory. Avoid sharing `node_modules`: switching Git branches does not clear pnpm’s `ignoredBuilds` state. Dependency build permissions are recorded in this branch’s `pnpm-workspace.yaml`. This branch explicitly allows the esbuild build script.
+
+## Shader conversion and migration regression (0.1.2)
+
+Default `assetType: 'all'` now converts Shader objects; `assetType: 'shader'`
+selects them explicitly. Both memory and disk APIs produce UTF-8 `.shader`
+files containing ShaderLab structure, GLSL/Metal source and Vulkan SPIR-V
+assembly, including Unity 2021.2+ player variants and segmented program blobs.
+SMOL-V decoding is implemented in TypeScript; the SPIRV-Tools disassembler
+ships as WASM with no runtime downloads or external executable requirement.
+As with the original AssetStudio converter, this is an inspection export,
+not re-compilable original Shader source. DXBC retains the original explicit
+unsupported-disassembly comment.
+
+Shader names use the parsed ShaderLab name. Unnamed MonoBehaviours use their
+same-file MonoScript class name. Default asset-name exports append a PathID
+to subsequent same-name objects. Explicit ID collisions and duplicate archive
+entries still fail instead of overwriting data.
+
+The garupa-unpacker 10.1.0.240 → 10.1.0.250 workflow passes using an installed
+package: 11 bundle inputs, 7 successful resource items, 21 final changed files,
+and no raw-export fallback. See [the regression record](COMPATIBILITY.md).
+This validates Shader, MonoBehaviour, Texture2D and TextAsset for that workflow;
+FBX/Animator, MovieTexture and Texture2DArray conversions remain unimplemented.
+
+To exercise the real Shader integration and offline package checks, also set
+`ASSET_STUDIO_TEST_SHADER_INPUT` to the gacha1937 bundle when running
+`test:integration` and `test:package`. Real game resources are not committed.

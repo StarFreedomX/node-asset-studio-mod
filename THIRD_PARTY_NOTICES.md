@@ -163,3 +163,28 @@ FP16 license (also distributed in dist/licenses/astc-fp16-LICENSE.txt):
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
+
+## ShaderLab conversion — MIT
+
+`src/shader.ts` adapts `AssetStudioUtility/ShaderConverter.cs` from
+[AssetStudioMod v0.19.0](https://github.com/aelurum/AssetStudio/tree/v0.19.0),
+with Unity 2021.2+ player variants and bounds-checked lazy subprogram reading.
+The license is in `vendor/assetstudio/LICENSE` and distributed as
+`dist/licenses/assetstudio-LICENSE`.
+
+## SMOL-V — MIT
+
+`src/smolv.ts` adapts the decoder and opcode table from
+[aras-p/smol-v revision 9dd54c379ac29fa148cb1b829bb939ba7381d8f4](https://github.com/aras-p/smol-v/tree/9dd54c379ac29fa148cb1b829bb939ba7381d8f4).
+We select the upstream MIT option. The full license is distributed as
+`dist/licenses/smol-v-LICENSE`; source provenance and test fixture generation
+are documented in `vendor/smol-v/README.md`.
+
+## SPIRV-Tools WebAssembly — Apache-2.0
+
+Vulkan shader disassembly uses `spirv-tools@20.4.1`, the WASM build from
+[SPIRV-Tools.js](https://github.com/pjoe/SPIRV-Tools.js) of
+[Khronos SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools).
+The unmodified JavaScript glue and WASM are included in `dist/vendor`;
+`dist/licenses/spirv-tools-LICENSE` contains its Apache-2.0 license.
+Our adapter supplies local WASM bytes explicitly, with no runtime download.

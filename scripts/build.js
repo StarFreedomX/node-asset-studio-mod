@@ -158,3 +158,26 @@ await copyFile(
   path.join(root, "vendor/astc/fp16.h"),
   path.join(root, "dist/licenses/astc-fp16-LICENSE.txt"),
 );
+
+await mkdir(path.join(root, "dist/vendor"), { recursive: true });
+await copyFile(
+  path.join(root, "node_modules/spirv-tools/dist/web/spirv-tools.js"),
+  path.join(root, "dist/vendor/spirv-tools.cjs"),
+);
+await copyFile(
+  path.join(root, "node_modules/spirv-tools/dist/web/spirv-tools.wasm"),
+  path.join(root, "dist/vendor/spirv-tools.wasm"),
+);
+await copyFile(
+  path.join(root, "node_modules/spirv-tools/LICENSE"),
+  path.join(root, "dist/licenses/spirv-tools-LICENSE"),
+);
+await copyFile(
+  path.join(root, "vendor/assetstudio/LICENSE"),
+  path.join(root, "dist/licenses/assetstudio-LICENSE"),
+);
+
+await copyFile(
+  path.join(root, "vendor/smol-v/LICENSE"),
+  path.join(root, "dist/licenses/smol-v-LICENSE"),
+);

@@ -70,7 +70,7 @@ try {
 | 功能               | 当前行为                                                                                                       |
 | ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `info` / `inspect` | 返回选中对象的名称、类型、容器、大小和 PathID                                                                  |
-| `export`           | Texture2D / Sprite 转 PNG；TextAsset、Font、Mesh OBJ、MonoBehaviour JSON、VideoClip、部分 AudioClip 由引擎导出 |
+| `export`           | Texture2D / Sprite 转 PNG；Shader 转 ShaderLab 检查文本；TextAsset、Font、Mesh OBJ、MonoBehaviour JSON、VideoClip、部分 AudioClip 由引擎导出 |
 | `extract`          | 解出 Bundle 内部文件，包括伴随资源                                                                             |
 | `exportRaw`        | 导出 serialized object 的原始字节，**不附加外部资源流**；完整资源请用 `extract`                                |
 | `dump`             | 依赖文件自带 TypeTree，返回 JSON；无 TypeTree 时明确失败                                                       |
@@ -78,15 +78,27 @@ try {
 | 图片格式           | `png`，或 `none` 导出 Texture2D 原始纹理字节为 `.tex`                                                          |
 | 音频               | 引擎的 JS PCM/Vorbis/MPEG 路径；需要 FMOD 的格式不支持，`wav` 不会强制把 OGG/MP3 转成 WAV                      |
 
-用户提供的 `res014089`（Unity `2022.3.62f1`）已实测：4 个 Texture2D，4 张 PNG 与此前 .NET 导出结果的解码 RGBA 像素完全一致；还验证了 Bundle 解包、外部资源回读、TypeTree 和原始字节导出。其他类型的转换尚未用真实样本验证，支持情况取决于新引擎。
+用户提供的 `res014089`（Unity `2022.3.62f1`）已实测：4 个 Texture2D，4 张 PNG 与此前 .NET 导出结果的解码 RGBA 像素完全一致；还验证了 Bundle 解包、外部资源回读、TypeTree 和原始字节导出。另已实测 garupa-unpacker 的 10.1.0.240 → 10.1.0.250 全类型迁移：11 个新旧包、7 个资源项全部通过，最终写出 21 个差异文件。Shader、MonoBehaviour、Texture2D 和 TextAsset 均走正常转换，无 `.bin` 兜底。详见 [迁移回归记录](COMPATIBILITY.md)。
 
-已移除 .NET 路径选项、安装器和 C# bridge。FBX、Animator、splitObjects、Shader / MovieTexture / Texture2DArray 转换、场景分组、外部程序集加载、压缩算法覆盖、旧 Live2D/FBX 专用选项及文件日志不支持。传入旧选项会报错，不会静默忽略。
+已移除 .NET 路径选项、安装器和 C# bridge。FBX、Animator、splitObjects、MovieTexture / Texture2DArray 转换、场景分组、外部程序集加载、压缩算法覆盖、旧 Live2D/FBX 专用选项及文件日志不支持。传入旧选项会报错，不会静默忽略。
 
 `assetType` 可为单值或数组；`all` 选择 API 已列举的资源类型，不代表全部 Unity 对象。过滤支持 `filterByName` / `filterByContainer`、`filterByPathID`、`filterByText` 和 `filterWithRegex`；文本过滤优先于 PathID，PathID 优先于名称/容器。
 
-输出默认按 `container` 分组，另有 `none`、`type`、`containerFull`、`fileName`。命名支持 `assetName`、`assetName_pathID`、`pathID`。已有文件默认报错，`overwrite: true` 允许覆盖；同次导出重名仍报错，建议选用带 PathID 的命名。拒绝资源中的路径穿越和输出子目录符号链接。
+输出默认按 `container` 分组，另有 `none`、`type`、`containerFull`、`fileName`。命名支持 `assetName`、`assetName_pathID`、`pathID`。已有文件默认报错，`overwrite: true` 允许覆盖；默认 `assetName` 同次导出重名时，后续对象自动追加 PathID，保留所有对象；显式 PathID 命名仍重名时会报错。归档解包重名仍报错。拒绝资源中的路径穿越和输出子目录符号链接。
 
 默认输入及伴随资源预算 `maxInputBytes` 为 512 MiB，输出预算 `maxOutputBytes` 在 `readAssets` 中为 512 MiB、写入目录时为 16 GiB，单张 Texture2D 上限 `maxTexturePixels` 为 64 × 1024 × 1024。可传正整数调整。这些是处理预算，不是整个进程或 WASM 内存的硬上限。
+
+### Shader 导出
+
+默认 `assetType: 'all'` 包含 Shader，也可单独指定 `assetType: 'shader'`。
+`readAssets` 返回带 `.shader` 路径的 UTF-8 字节，目录导出使用相同内容。
+支持旧脚本、压缩 ShaderLab、Unity 2021.2+ player variants、分段程序，
+GLSL/Metal 源码及 Vulkan SMOL-V → SPIR-V 反汇编。Shader 和无名 MonoBehaviour
+分别使用 ShaderLab 名称和同文件 MonoScript 类名，支持名称过滤。
+
+和原 AssetStudio 转换语义一致，`.shader` 是供检查的可读文本，不能当成可重新编译的原始 Shader；
+DXBC 子程序仍输出原转换器的“不支持反汇编”注释。此版本没有实现 FBX/Animator、
+MovieTexture、Texture2DArray 转换，不能据本次业务回归宣称所有引擎功能完全等价。
 
 ## 开发与验证
 
@@ -130,7 +142,7 @@ npm run build
 npm test
 npm pack
 # 检查生成的压缩包后再发布：
-npm publish ./node-asset-studio-mod-js-0.1.0.tgz --access public
+npm publish ./node-asset-studio-mod-js-0.1.2.tgz --access public
 ```
 
 `npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。三个实现使用同一 Git 仓库的 worktree 维护，目录和命令见 [worktree 维护说明](WORKTREES.md)。依赖和下载文件由各工作目录分别保存。
