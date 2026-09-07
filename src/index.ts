@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { cliEnvironment } from "../scripts/cli-runtime.js";
 import path from "path";
 import fs from "node:fs";
 import os from "os";
@@ -181,7 +182,7 @@ export class AssetExporter {
         if (useLog) console.log("exec:", cliPath, args.join(" "));
 
         await new Promise<void>((resolve, reject) => {
-            const proc = spawn(cliPath, args, { shell: true, windowsHide: true });
+            const proc = spawn(cliPath, args, { shell: true, windowsHide: true, env: cliEnvironment() });
 
             let settled = false; // 防止重复 resolve/reject
 

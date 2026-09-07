@@ -10,7 +10,6 @@
 /dist/
 /.idea/
 /bin/
-/pnpm-workspace.yaml
 
 /scripts/benchmark/
 /reports/benchmark-*

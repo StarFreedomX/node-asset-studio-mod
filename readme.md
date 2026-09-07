@@ -57,14 +57,15 @@ await exportAssets(input, output);
 You can override options by passing a config object:
 
 ```
-import { exportAssets } from "node-asset-studio-mod";
+import { createExporter } from "node-asset-studio-mod";
 
-await exportAssets(input, output, {
+const exporter = createExporter({
 assetType: ["tex2d", "sprite", "textasset"],
 overwrite: true,
 imageFormat: "png",
 logLevel: "info",
 });
+await exporter.exportAssets(input, output);
 ```
 
 ---
@@ -112,6 +113,25 @@ Supported modes (matching TS `ExportMode`):
 ```
 "extract", "export", "exportRaw", "dump", "info", "live2d", "splitObjects", "animator"
 ```
+
+## Installation cache and local runtime
+
+Successful installs record `.install.json`. Subsequent installs verify the release and every file's SHA-256 and skip the download when intact. Legacy installations are adopted after a version probe. Missing or damaged files trigger a reinstall; download or extraction failures preserve the previous installation.
+
+Installation checks and API calls share runtime discovery: `ASSET_STUDIO_DOTNET` (path to the dotnet executable), the package's `bin/dotnet/`, `DOTNET_ROOT_X64`, `DOTNET_ROOT`, then PATH. Official platform CLIs are x64 and require **.NET 9 x64 Runtime**. ARM64 Runtime alone on Apple Silicon is insufficient. Downloading the CLI does not install .NET.
+
+```sh
+# Force reinstall from the source checkout
+pnpm setup:cli
+# Install using a local official archive
+ASSET_STUDIO_CLI_ARCHIVE=/absolute/path/AssetStudioModCLI_net9_mac64.zip pnpm setup:cli
+# Select an existing runtime for installation or API calls
+ASSET_STUDIO_DOTNET=/absolute/path/dotnet pnpm install
+```
+
+This branch's `pnpm-workspace.yaml` declares no dependency build scripts. Move aside stale `node_modules` before reinstalling if it was used by another branch: Git does not clear pnpm's `ignoredBuilds` state. Prefer separate worktrees for `pipe` and `js`, each with its own `pnpm install`. The JS branch explicitly allows esbuild's build script.
+
+Run `pnpm test`. Set `ASSET_STUDIO_TEST_CLI_ARCHIVE` to the current platform's official ZIP to additionally test offline installation, cache hits, corruption repair and preservation after failed installs.
 
 ## Build and publish
 

@@ -1,114 +1,141 @@
-// scripts/download-cli.js
-import https from 'https';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { execSync, exec } from 'child_process';
-import { fileURLToPath } from 'url';
+import https from 'node:https';
+import fs from 'node:fs';
+import { mkdtemp, mkdir, readFile, writeFile, readdir, stat, chmod, rm, rename } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { pipeline } from 'node:stream/promises';
 import unzipper from 'unzipper';
-import { URL } from 'url';
+import { findDotnet, cliEnvironment } from './cli-runtime.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const binDir = path.join(__dirname, '../bin');
-const zipPath = path.join(binDir, 'cli.zip');
+const root = fileURLToPath(new URL('../', import.meta.url));
+const release = '0.19.0';
 
-async function checkDotnet() {
+export function cliLayout(platform = process.platform) {
+    const target = { win32: 'win64', darwin: 'mac64', linux: 'linux64' }[platform];
+    if (!target) throw new Error(`Unsupported platform: ${platform}`);
+    const folder = `AssetStudioModCLI_net9_${target}`;
+    return { folder, executable: platform === 'win32' ? 'AssetStudioModCLI.exe' : 'AssetStudioModCLI',
+        url: `https://github.com/aelurum/AssetStudioMod/releases/download/v${release}/${folder}.zip` };
+}
+
+async function manifest(directory) {
+    const files = {};
+    async function visit(dir, prefix = '') {
+        for (const entry of await readdir(dir, { withFileTypes: true })) {
+            const relative = prefix + entry.name;
+            if (entry.isDirectory()) await visit(path.join(dir, entry.name), relative + '/');
+            else if (entry.isFile() && relative !== '.install.json') {
+                const data = await readFile(path.join(dir, entry.name));
+                files[relative] = { size: data.length, sha256: createHash('sha256').update(data).digest('hex') };
+            }
+        }
+    }
+    await visit(directory);
+    return files;
+}
+
+export async function cacheValid(directory, layout) {
     try {
-        const out = execSync('dotnet --list-runtimes').toString();
-        if (out.includes('Microsoft.NETCore.App 9.')) {
-            console.log('✔ 已检测到 .NET 9 Runtime');
-            return true;
-        }
-    } catch {}
-    console.log(`
-⚠ 检测到未安装 .NET 9 Runtime
-Windows (.NET Desktop): https://dotnet.microsoft.com/download/dotnet/9.0
-Linux/macOS (.NET Runtime): https://dotnet.microsoft.com/download/dotnet/9.0
-`);
-    return false;
+        const saved = JSON.parse(await readFile(path.join(directory, '.install.json'), 'utf8'));
+        if (saved.release !== release || saved.url !== layout.url || !saved.files?.[layout.executable]?.size) return false;
+        // Verify every installed file, including native libraries, before skipping a download.
+        const actual = await manifest(directory);
+        const names = Object.keys(saved.files);
+        return names.length === Object.keys(actual).length && names.every(name =>
+            actual[name]?.size === saved.files[name].size && actual[name]?.sha256 === saved.files[name].sha256);
+    } catch { return false; }
 }
 
-function getDownloadURL() {
-    const base = 'https://github.com/aelurum/AssetStudioMod/releases/download/v0.19.0';
-
-    switch (os.platform()) {
-        case 'win32':
-            return `${base}/AssetStudioModCLI_net9_win64.zip`;
-        case 'darwin':
-            return `${base}/AssetStudioModCLI_net9_mac64.zip`;
-        case 'linux':
-            return `${base}/AssetStudioModCLI_net9_linux64.zip`;
-    }
-    throw new Error('Unsupported platform');
+async function saveManifest(directory, layout) {
+    const files = await manifest(directory);
+    if (!files[layout.executable]?.size) throw new Error('Archive does not contain the CLI executable');
+    await writeFile(path.join(directory, '.install.json'), JSON.stringify({ release, url: layout.url, files }, null, 2) + '\n');
 }
 
-function mirrorURLs(url) {
-    const u = new URL(url);
-    return [
-        `https://ghproxy.net/${url}`,
-        `https://download.fastgit.org${u.pathname}`,
-        `https://github.com.cnpmjs.org${u.pathname}`
-    ];
+async function makeExecutable(directory, layout) {
+    if (process.platform !== 'win32') await chmod(path.join(directory, layout.executable), 0o755);
 }
 
-function download(url) {
-    return new Promise((resolve, reject) => {
-        console.log('Downloading:', url);
+async function adoptLegacy(directory, layout, runtime) {
+    // Older installers did not write a manifest. Verify the executable's reported version once.
+    if (!runtime || fs.existsSync(path.join(directory, '.install.json'))) return false;
+    try {
+        if (!(await stat(path.join(directory, layout.executable))).size) return false;
+        await makeExecutable(directory, layout);
+        const result = spawnSync(path.join(directory, layout.executable), ['--help'], {
+            encoding: 'utf8', shell: false, timeout: 10000, env: cliEnvironment(runtime),
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        if (result.error || result.status !== 0 || !/AssetStudioMod v0\.19\.0(?:\.0)?(?:\s|$)/m.test(result.stdout + result.stderr)) return false;
+        await saveManifest(directory, layout);
+        return true;
+    } catch { return false; }
+}
 
-        https.get(url, res => {
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                return resolve(download(res.headers.location)); // 处理302跳转
-            }
-            if (res.statusCode !== 200) {
-                return reject(new Error(`HTTP ${res.statusCode}`));
-            }
-
-            fs.mkdirSync(binDir, { recursive: true });
-            const file = fs.createWriteStream(zipPath);
-
-            res.pipe(file);
-            file.on('finish', () => file.close(resolve));
-            file.on('error', reject);
-        }).on('error', reject);
+async function download(url, destination, redirects = 0) {
+    if (redirects > 5) throw new Error('Too many redirects');
+    const response = await new Promise((resolve, reject) => {
+        const request = https.get(url, resolve).on('error', reject);
+        request.setTimeout(30000, () => request.destroy(new Error('Download timed out')));
     });
-}
-
-async function extract() {
-    console.log('Extracting...');
-    await fs.createReadStream(zipPath)
-        .pipe(unzipper.Extract({ path: binDir }))
-        .promise();
-    // unzipper writes regular files without restoring the ZIP's executable bits.
-    if (os.platform() !== 'win32') {
-        const folder = path.basename(new URL(getDownloadURL()).pathname, '.zip');
-        await fs.promises.chmod(path.join(binDir, folder, 'AssetStudioModCLI'), 0o755);
+    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        const next = new URL(response.headers.location, url);
+        if (next.protocol !== 'https:') throw new Error('Only HTTPS redirects are supported');
+        return download(next.href, destination, redirects + 1);
     }
+    if (response.statusCode !== 200) { response.resume(); throw new Error(`HTTP ${response.statusCode}`); }
+    await pipeline(response, fs.createWriteStream(destination));
 }
 
-async function main() {
-    await checkDotnet();
-
-    const url = getDownloadURL();
-    const urls = [url, ...mirrorURLs(url)];
-
-    for (const u of urls) {
-        try {
-            console.log('尝试下载:', u);
-            await download(u);
-            console.log('✔ 下载成功:', u);
-            await extract();
-            console.log('AssetStudioModCLI 下载完成');
-            fs.unlinkSync(zipPath);
-            console.log('已清理临时文件 cli.zip');
-            return;
-        } catch (err) {
-            console.log(`✘ 失败: ${u}`);
-            console.log(err.message);
+export async function installCli({ force = false, archive = process.env.ASSET_STUDIO_CLI_ARCHIVE } = {}) {
+    const layout = cliLayout();
+    const bin = path.join(root, 'bin');
+    const destination = path.join(bin, layout.folder);
+    const runtime = findDotnet();
+    if (runtime) console.log(`✔ 已检测到 .NET ${runtime.version} x64 Runtime: ${runtime.executable}`);
+    else console.warn('⚠ 未找到 .NET 9 x64 Runtime。可设置 ASSET_STUDIO_DOTNET、DOTNET_ROOT_X64、DOTNET_ROOT，或放入 bin/dotnet/。下载 CLI 不会安装 .NET。');
+    if (!force && (await cacheValid(destination, layout) || await adoptLegacy(destination, layout, runtime))) {
+        await makeExecutable(destination, layout);
+        console.log(`✔ CLI v${release} 已就绪，跳过下载`);
+        return;
+    }
+    await mkdir(bin, { recursive: true });
+    const temporary = await mkdtemp(path.join(bin, 'cli-setup-'));
+    try {
+        const zip = archive ? path.resolve(archive) : path.join(temporary, 'cli.zip');
+        if (!archive) {
+            const upstream = new URL(layout.url);
+            const urls = [layout.url, `https://ghproxy.net/${layout.url}`,
+                `https://download.fastgit.org${upstream.pathname}`, `https://github.com.cnpmjs.org${upstream.pathname}`];
+            let downloaded = false;
+            for (const url of urls) {
+                try {
+                    console.log(`Downloading: ${url}`);
+                    await download(url, zip);
+                    downloaded = true;
+                    break;
+                } catch (error) { console.warn(`下载失败: ${error.message}`); }
+            }
+            if (!downloaded) throw new Error('所有下载方式均失败；可使用 ASSET_STUDIO_CLI_ARCHIVE 指定本地压缩包');
         }
-    }
-
-    console.error('所有下载方式均失败，请手动下载');
-    process.exit(1);
+        const unpacked = path.join(temporary, 'unpacked');
+        await pipeline(fs.createReadStream(zip), unzipper.Extract({ path: unpacked }));
+        const prepared = path.join(unpacked, layout.folder);
+        await makeExecutable(prepared, layout);
+        await saveManifest(prepared, layout);
+        // Do not replace an existing installation until extraction and validation succeed.
+        const backup = path.join(temporary, 'previous');
+        const hadPrevious = fs.existsSync(destination);
+        if (hadPrevious) await rename(destination, backup);
+        try { await rename(prepared, destination); }
+        catch (error) { if (hadPrevious) await rename(backup, destination); throw error; }
+        console.log(`✔ CLI v${release} 安装完成`);
+    } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    installCli({ force: process.argv.includes('--force') }).catch(error => { console.error(error.message); process.exitCode = 1; });
+}

@@ -9,14 +9,17 @@
     "build": "node scripts/build.js",
     "postinstall": "node scripts/download-cli.js",
     "pub": "npm publish",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "setup:cli": "node scripts/download-cli.js --force",
+    "test": "node --test tests/*.test.mjs"
   },
   "files": [
     "dist",
     "scripts/build.js",
     "scripts/download-cli.js",
     "readme.md",
-    "readme_CN.md"
+    "readme_CN.md",
+    "scripts/cli-runtime.js"
   ],
   "exports": {
     ".": {

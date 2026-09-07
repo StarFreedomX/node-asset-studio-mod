@@ -54,14 +54,15 @@ await exportAssets(input, output);
 你可以通过传入配置对象覆盖默认选项：
 
 ```
-import { exportAssets } from "node-asset-studio-mod";
+import { createExporter } from "node-asset-studio-mod";
 
-await exportAssets(input, output, {
+const exporter = createExporter({
 assetType: ["tex2d", "sprite", "textasset"],
 overwrite: true,
 imageFormat: "png",
 logLevel: "info",
 });
+await exporter.exportAssets(input, output);
 ```
 
 ---
@@ -109,6 +110,25 @@ await exporter.exportAssets(input, output);
 ```
 "extract", "export", "exportRaw", "dump", "info", "live2d", "splitObjects", "animator"
 ```
+
+## 安装缓存与本地运行时
+
+CLI 安装成功后会记录 `.install.json`。后续安装校验版本和各文件的 SHA-256，文件完整时跳过下载；旧安装首次通过版本探测后会补写记录。缺失或损坏时重新下载，下载或解压失败会保留原安装。
+
+安装检测和实际调用共用运行时选择：`ASSET_STUDIO_DOTNET`（dotnet 可执行文件路径）、包目录 `bin/dotnet/`、`DOTNET_ROOT_X64`、`DOTNET_ROOT`，最后查找 PATH。官方平台 CLI 是 x64，需要 **.NET 9 x64 Runtime**；Apple Silicon 上仅安装 ARM64 Runtime 不够。下载 CLI 不会安装 .NET。
+
+```sh
+# 在源码目录强制重新安装 CLI
+pnpm setup:cli
+# 使用本地官方压缩包离线安装
+ASSET_STUDIO_CLI_ARCHIVE=/absolute/path/AssetStudioModCLI_net9_mac64.zip pnpm setup:cli
+# 指定现有运行时，安装和调用时均可使用
+ASSET_STUDIO_DOTNET=/absolute/path/dotnet pnpm install
+```
+
+`pnpm-workspace.yaml` 为本分支声明无需依赖构建脚本。若复用其他分支的旧 `node_modules`，应移走后重新安装；已有的 `ignoredBuilds` 状态不会随 Git 切换清除。建议为 `pipe`、`js` 使用独立 worktree，各自执行 `pnpm install`；JS 分支单独允许 esbuild 的构建脚本。
+
+测试使用 `pnpm test`。设置 `ASSET_STUDIO_TEST_CLI_ARCHIVE` 为当前平台的官方 ZIP，可额外验证离线安装、缓存命中、损坏修复和安装失败回退。
 
 ## 构建与发布
 
