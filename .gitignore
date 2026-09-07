@@ -17,3 +17,4 @@
 /reports/benchmark-*
 /tests/bridge/bin/
 /tests/bridge/obj/
+/.worktrees/

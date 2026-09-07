@@ -1,6 +1,6 @@
 {
   "name": "node-asset-studio-mod-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Controlled Node.js pipe API for linked AssetStudioMod libraries",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -34,7 +34,8 @@
     "bridge/AssetStudioBridge.csproj",
     "bin/bridge",
     "readme.md",
-    "readme_CN.md"
+    "readme_CN.md",
+    "WORKTREES.md"
   ],
   "exports": {
     ".": {

@@ -166,7 +166,7 @@ npm pack
 npm publish ./node-asset-studio-mod-bridge-0.1.0.tgz --access public
 ```
 
-`npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。多个实现建议使用独立检出目录：Git 切换分支不会切换已安装依赖和下载的运行时文件。
+`npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。三个实现使用同一 Git 仓库的 worktree 维护，目录和命令见 [worktree 维护说明](WORKTREES.md)。依赖和下载文件由各工作目录分别保存。
 
 ## 分支依赖隔离
 
