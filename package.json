@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
     "postinstall": "node scripts/download-cli.js",
-    "pub": "pnpm publish"
+    "pub": "npm publish"
   },
   "files": [
     "dist",
