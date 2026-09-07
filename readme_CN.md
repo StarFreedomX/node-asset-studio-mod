@@ -1,4 +1,4 @@
-# node-asset-studio-mod
+# node-asset-studio-mod-bridge
 
 通过可控管道调用 [AssetStudioMod](https://github.com/aelurum/AssetStudioMod) 的 Node.js / TypeScript 库。
 
@@ -37,7 +37,7 @@ npm run build
 快捷函数自动关闭桥接进程，包括失败或取消时：
 
 ```js
-import { inspectAssets, exportAssets } from 'node-asset-studio-mod';
+import { inspectAssets, exportAssets } from 'node-asset-studio-mod-bridge';
 
 const input = '/absolute/path/to/res014089';
 const info = await inspectAssets(input, { unityVersion: '2022.3.62f1' });
@@ -55,7 +55,7 @@ console.log(result.exportedCount);
 ## 复用连接与控制生命周期
 
 ```js
-import { createExporter } from 'node-asset-studio-mod';
+import { createExporter } from 'node-asset-studio-mod-bridge';
 
 const exporter = createExporter({ unityVersion: '2022.3.62f1', log: false });
 const controller = new AbortController();
@@ -151,3 +151,19 @@ node scripts/export-assets.js /absolute/path/to/res014089 /absolute/path/to/outp
 集成用例使用 Unity `2022.3.62f1`（可通过 `ASSET_STUDIO_TEST_UNITY_VERSION` 覆盖），验证 res014089 的 4 张贴图、PNG 解压数据与尺寸、连续调用、筛选复位、特殊字符路径、覆盖失败、取消、超时及多实例并行。样本不复制进仓库，测试输出在临时目录中自动清理。
 
 底层 AssetStudio 和导出辅助代码来自上游 v0.19.0；来源、许可证和本地修改见 `bridge/vendor/AssetStudioCLI/README.md`。
+
+## 构建与发布
+
+构建桥接层需要 .NET 9 SDK；使用者只需要 .NET 9 Runtime。
+
+```sh
+npm install --ignore-scripts
+npm run setup:bridge
+npm run build
+npm test
+npm pack
+# 检查生成的压缩包后再发布：
+npm publish ./node-asset-studio-mod-bridge-0.1.0.tgz --access public
+```
+
+`npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。多个实现建议使用独立检出目录：Git 切换分支不会切换已安装依赖和下载的运行时文件。

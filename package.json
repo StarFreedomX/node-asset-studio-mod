@@ -9,8 +9,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc && node scripts/build-bridge.js",
-    "build:ts": "tsc",
+    "build": "npm run build:ts && node scripts/build-bridge.js",
+    "build:ts": "node scripts/build-ts.js",
     "setup:bridge": "node scripts/setup-bridge.js --force",
     "postinstall": "node scripts/setup-bridge.js",
     "prepack": "npm run build",
@@ -22,6 +22,7 @@
   "files": [
     "dist",
     "scripts/build-bridge.js",
+    "scripts/build-ts.js",
     "scripts/dotnet.js",
     "scripts/export-assets.js",
     "scripts/setup-bridge.js",

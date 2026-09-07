@@ -1,4 +1,4 @@
-# node-asset-studio-mod
+# node-asset-studio-mod-bridge
 
 A controlled Node.js / TypeScript pipe API for [AssetStudioMod](https://github.com/aelurum/AssetStudioMod).
 
@@ -28,7 +28,7 @@ Native support depends on the .NET process OS/architecture. Tested on macOS arm6
 One-shot helpers always close their worker:
 
 ```js
-import { inspectAssets, exportAssets } from 'node-asset-studio-mod';
+import { inspectAssets, exportAssets } from 'node-asset-studio-mod-bridge';
 
 const input = '/absolute/path/to/res014089';
 const info = await inspectAssets(input, { unityVersion: '2022.3.62f1' });
@@ -45,7 +45,7 @@ console.log(result.exportedCount);
 Reuse a connection and control cancellation:
 
 ```js
-import { createExporter } from 'node-asset-studio-mod';
+import { createExporter } from 'node-asset-studio-mod-bridge';
 
 const exporter = createExporter({ unityVersion: '2022.3.62f1', log: false });
 const controller = new AbortController();
@@ -111,3 +111,19 @@ node scripts/export-assets.js /absolute/path/to/res014089 /absolute/path/to/outp
 Integration checks the fixture's four textures, PNG dimensions and decompressed data, state reset, literal paths, overwrite failures, cancellation, timeout and concurrent instances. Set `ASSET_STUDIO_TEST_UNITY_VERSION` to override the default 2022.3.62f1. The fixture is not committed, and test outputs are temporary.
 
 Upstream source/license and local changes: `bridge/vendor/AssetStudioCLI/README.md`.
+
+## Build and publish
+
+Requires .NET 9 SDK to build the bridge; consumers only need .NET 9 Runtime.
+
+```sh
+npm install --ignore-scripts
+npm run setup:bridge
+npm run build
+npm test
+npm pack
+# Run after inspecting the generated tarball:
+npm publish ./node-asset-studio-mod-bridge-0.1.0.tgz --access public
+```
+
+`npm pack` rebuilds through `prepack`. Use an unused package version for each release. Prefer separate checkouts when building multiple implementations; generated dependencies and runtime files are not switched by Git.
