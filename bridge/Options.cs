@@ -33,6 +33,7 @@ internal static class CLIOptions
     public static Option<LoggerEvent> o_logLevel = new(LoggerEvent.Info);
     public static bool convertTexture = true;
     public static Option<ImageFormat> o_imageFormat = new(ImageFormat.Png);
+    public static int? PngCompressionLevel;
     public static Option<AudioFormat> o_audioFormat = new(AudioFormat.Wav);
     public static Option<Live2DModelGroupOption> o_l2dGroupOption = new(Live2DModelGroupOption.ContainerPath);
     public static Option<bool> f_l2dAssetSearchByFilename = new(false);
@@ -71,7 +72,7 @@ internal static class CLIOptions
     private static readonly HashSet<string> KnownOptions =
     [
         "mode", "assetType", "group", "filenameFormat", "overwrite", "logLevel",
-        "logOutput", "imageFormat", "audioFormat", "l2dGroupOption", "l2dMotionMode", "l2dSearchByFilename",
+        "logOutput", "imageFormat", "pngCompressionLevel", "audioFormat", "l2dGroupOption", "l2dMotionMode", "l2dSearchByFilename",
         "l2dForceBezier", "fbxScaleFactor", "fbxBoneSize", "fbxAnimation", "fbxUVsAsDiffuse", "filterByName",
         "filterByContainer", "filterByPathID", "filterByText", "filterWithRegex", "blockinfoComp", "blockComp",
         "maxExportTasks", "exportAssetList", "assemblyFolder", "unityVersion", "decompressToDisk", "notRestoreExtension",
@@ -126,6 +127,9 @@ internal static class CLIOptions
         o_filenameFormat.Value = E("filenameFormat", FilenameFormat.AssetName);
         f_overwriteExisting.Value = B("overwrite");
         convertTexture = S("imageFormat", "png") != "none";
+        PngCompressionLevel = config.TryGetProperty("pngCompressionLevel", out var pngLevel) ? pngLevel.GetInt32() : null;
+        if (PngCompressionLevel is < 0 or > 9)
+            throw new ArgumentException("pngCompressionLevel must be an integer between 0 and 9");
         o_imageFormat.Value = S("imageFormat", "png") switch
         {
             "none" or "png" => ImageFormat.Png, "jpg" => ImageFormat.Jpeg,

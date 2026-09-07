@@ -1,5 +1,7 @@
 ﻿using AssetStudio;
 using AssetStudioCLI.Options;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -45,17 +47,17 @@ namespace AssetStudioCLI
                     debugLog += sb.ToString();
                 }
 
-                var image = m_Texture2D.ConvertToImage(flip: true);
-                if (image == null)
+                var decoded = DecodedTexture.Create(m_Texture2D);
+                if (decoded == null)
                 {
                     Logger.Error($"{debugLog}Export error. Failed to convert texture \"{m_Texture2D.m_Name}\" into image");
                     return false;
                 }
-                using (image)
+                using (decoded)
                 {
-                    using (var file = File.OpenWrite(exportFullPath))
+                    using (var file = File.Create(exportFullPath))
                     {
-                        image.WriteToStream(file, type);
+                        WriteImage(decoded.Image, file, type);
                     }
                     debugLog += $"{item.TypeString} \"{item.Text}\" exported to \"{exportFullPath}\"";
                     return true;
@@ -83,15 +85,23 @@ namespace AssetStudioCLI
             {
                 using (image)
                 {
-                    using (var file = File.OpenWrite(exportFullPath))
+                    using (var file = File.Create(exportFullPath))
                     {
-                        image.WriteToStream(file, type);
+                        WriteImage(image, file, type);
                     }
                     debugLog += $"{item.TypeString} \"{item.Text}\" exported to \"{exportFullPath}\"";
                     return true;
                 }
             }
             return false;
+        }
+
+        private static void WriteImage(Image image, Stream stream, ImageFormat type)
+        {
+            if (type == ImageFormat.Png && CLIOptions.PngCompressionLevel is int level)
+                image.SaveAsPng(stream, new PngEncoder { CompressionLevel = (PngCompressionLevel)level });
+            else
+                image.WriteToStream(stream, type);
         }
 
         public static bool ExportAudioClip(AssetItem item, string exportPath, out string debugLog)

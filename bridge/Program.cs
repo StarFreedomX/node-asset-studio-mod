@@ -60,6 +60,9 @@ internal static class Program
                 var output = method == "export" ? Path.GetFullPath(request.GetProperty("output").GetString()) : "";
                 try { CLIOptions.Configure(input, output, request.GetProperty("config"), method == "inspect"); }
                 catch (Exception ex) { throw new ArgumentException($"Invalid configuration: {ex.Message}", ex); }
+                // Assets already run in parallel; avoid a second thread pool fan-out per image.
+                SixLabors.ImageSharp.Configuration.Default.MaxDegreeOfParallelism =
+                    CLIOptions.o_maxParallelExportTasks.Value > 1 ? 1 : Environment.ProcessorCount;
                 Studio.assetsManager = new AssetsManager();
                 initialized = true;
                 Studio.assetsManager.OptionLoaders.Clear();
@@ -72,8 +75,7 @@ internal static class Program
                 else Studio.assemblyLoader.Loaded = true;
                 var progress = new PipeProgress(id);
                 AssetStudio.Progress.Default = progress;
-                Studio.ExportProgress = (completed, total) => Send(new { type = "progress", id, phase = "export", completed, total,
-                    percent = total == 0 ? 100 : (int)(100L * completed / total) });
+                Studio.ExportProgress = new PipeExportProgress(id).Report;
                 var mode = CLIOptions.o_workMode.Value;
                 if (mode != WorkMode.Info) Directory.CreateDirectory(output);
                 if (mode == WorkMode.Extract)
@@ -87,6 +89,7 @@ internal static class Program
                     if (!Studio.LoadAssets()) throw new InvalidDataException("No Unity serialized files could be loaded");
                     progress.Phase = "parse";
                     Studio.ParseAssets();
+                    SharedResourceReaders.Prepare(Studio.assetsManager);
                     if (CLIOptions.filterBy != FilterBy.None) Studio.Filter();
                     // Never continue exporting a partially failed load without telling the caller.
                     if (!logger.Errors.IsEmpty) throw new InvalidDataException("Asset loading or parsing failed");
@@ -141,10 +144,27 @@ internal static class Program
         public ConcurrentQueue<string> Errors { get; } = new();
         public void Log(LoggerEvent level, string message, bool ignoreLevel = false)
         {
+            if (level != LoggerEvent.Error && level < CLIOptions.o_logLevel.Value && !ignoreLevel) return;
             message = Regex.Replace(message, @"\x1b\[[0-9;]*m", "");
             if (level == LoggerEvent.Error && Errors.Count < 100) Errors.Enqueue(message);
             if (level < CLIOptions.o_logLevel.Value && !ignoreLevel) return;
             Send(new { type = "log", id = getId(), level = level.ToString().ToLowerInvariant(), message });
+        }
+    }
+    private sealed class PipeExportProgress(string id)
+    {
+        private readonly object gate = new();
+        private int lastPercent = -1;
+        public void Report(int completed, int total)
+        {
+            var percent = total == 0 ? 100 : (int)(100L * completed / total);
+            lock (gate)
+            {
+                // Parallel completions may arrive out of order. Emit monotonic integer percentages.
+                if (percent <= lastPercent) return;
+                lastPercent = percent;
+                Send(new { type = "progress", id, phase = "export", completed, total, percent });
+            }
         }
     }
     private sealed class PipeProgress(string id) : IProgress<int>

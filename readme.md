@@ -21,7 +21,7 @@ Source postinstall downloads the pinned official v0.19.0 portable archive, check
 
 Use `ASSET_STUDIO_DOTNET` to select the build SDK. The scripts also check `bin/dotnet/dotnet`, `DOTNET_ROOT` and PATH. No system runtime is automatically installed. Run `npm run setup:bridge` to rebuild dependencies, or set `ASSET_STUDIO_ARCHIVE` to a local official portable ZIP for offline setup.
 
-Native support depends on the .NET process OS/architecture. Tested on macOS x64 using x64 .NET on Apple Silicon; other platforms need validation.
+Native support depends on the .NET process OS/architecture. Tested on macOS arm64 and x64 .NET on Apple Silicon; other platforms need validation.
 
 ## Usage
 
@@ -68,6 +68,8 @@ Abort/timeout terminates that worker and waits for exit before rejecting. The ne
 
 `onEvent` receives typed `log` and `progress` events. If it throws, the operation stops with `CALLBACK_ERROR`. Without a callback, `log: true` writes logs to stderr. `log: false` never disables error detection.
 
+Asset export progress is coalesced to increasing integer percentages (at most 101 notifications per export). Each notification includes the latest completed count; successful completion reports 100%. Do not rely on receiving one event per file.
+
 ## Results and errors
 
 Methods return `{ loadedFiles, assetCount, exportedCount, output, assets }`. Each asset contains `{ name, type, pathId, container, size, source }`. `pathId` is a string to preserve Int64 precision. `assetCount` counts selected exportable assets, not every Unity object. Exported asset/object counts may differ from output file counts. `info` returns count 0 and output null; Live2D returns exportedCount null; `extract` reports extracted files with an empty asset list.
@@ -82,6 +84,12 @@ See `src/types.ts` for the full typed API. Existing export/group/image/audio/fil
 
 Modes: `extract`, `export`, `exportRaw`, `dump`, `info`, `live2d`, `splitObjects`, `animator`. Live2D/model modes select supporting object types according to upstream requirements.
 
+For Texture2D, Texture2DArray and Sprite PNG export, `pngCompressionLevel: 1` selects faster lossless compression at the cost of larger files. The range is 0–9; omit it to keep upstream PNG settings. This option does not change texture decoding, pixels or the settings of other image formats, and does not affect Live2D/model export. It can be overridden per request and resets to the instance default on the next call.
+
+Texture2D export wraps its decoded buffer directly until encoding finishes, avoiding an extra full-image copy. Switch textures retain upstream cropping behavior. ImageSharp internal parallelism is limited to one when multiple assets are exported concurrently; `maxExportTasks` continues to control asset-level parallelism.
+
+Inline textures, array layers and audio resources share one reader per serialized file before parallel export. This makes the upstream reader lock protect the shared stream and prevents concurrent seeks from reading another resource's bytes.
+
 Asset types: `all`, `tex2d`, `tex2dArray`, `sprite`, `textasset`, `monobehaviour`, `font`, `shader`, `movietexture`, `audio`, `video`, `mesh`, `animator`.
 
 Breaking changes:
@@ -95,6 +103,7 @@ Breaking changes:
 
 ```bash
 npm test
+npm run test:bridge # .NET SDK: shared-stream concurrency regression
 ASSET_STUDIO_TEST_INPUT=/absolute/path/to/res014089 npm run test:integration
 node scripts/export-assets.js /absolute/path/to/res014089 /absolute/path/to/output 2022.3.62f1
 ```

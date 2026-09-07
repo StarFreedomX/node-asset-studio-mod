@@ -713,7 +713,7 @@ namespace AssetStudioCLI
                             break;
                         case ClassIDType.Texture2DArray:
                             var m_Texture2DArray = (Texture2DArray)asset.Asset;
-                            toExportCount += m_Texture2DArray.TextureList.Count - 1;
+                            Interlocked.Add(ref toExportCount, m_Texture2DArray.TextureList.Count - 1);
                             foreach (var texture in m_Texture2DArray.TextureList)
                             {
                                 var fakeItem = new AssetItem(texture)

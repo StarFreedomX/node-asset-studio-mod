@@ -16,3 +16,5 @@
 
 /scripts/benchmark/
 /reports/benchmark-*
+/tests/bridge/bin/
+/tests/bridge/obj/

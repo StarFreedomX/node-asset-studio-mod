@@ -10,7 +10,7 @@ Node.js 与常驻 .NET 桥接进程通过 stdin/stdout 交换 JSON Lines 消息�
 
 - Node.js 22 或更新版本，ESM。
 - 运行需要 .NET 9 Runtime；从源码构建桥接层需要 .NET 9 SDK。
-- 底层原生解码库必须支持 .NET 进程的系统和架构；本项目实测 macOS x64（Apple Silicon 上通过 x64 .NET 运行）。其他平台仍需实测。
+- 底层原生解码库必须支持 .NET 进程的系统和架构；本项目在 Apple Silicon 上实测 macOS arm64 和 x64 .NET。其他平台仍需实测。
 
 从源码运行：
 
@@ -88,6 +88,7 @@ try {
 - 默认超时 120 秒，包含进程启动时间；`timeoutMs: 0` 禁用超时。
 - 取消或导出失败可能留下已写入的部分文件，不会回滚或删除它们。
 - `onEvent` 接收结构化日志与进度；没有回调且 `log: true` 时，日志写入 Node.js stderr。`log: false` 不会影响错误检测。回调抛异常会终止当前请求并返回 `CALLBACK_ERROR`。
+- 资源导出进度按递增的整数百分比合并，每次导出最多 101 条；事件携带当时的完成数量，全部成功时报告 100%。调用方不应依赖每个文件都有一条进度事件。
 
 ## 返回值与错误
 
@@ -123,6 +124,12 @@ interface AssetResult {
 常用选项：`mode`、`assetType`、`group`、`filenameFormat`、`overwrite`、`imageFormat`、`audioFormat`、`unityVersion`、`filterByName`、`filterByContainer`、`filterByPathID`、`filterByText`、`filterWithRegex`、`maxExportTasks`。完整类型见 `src/types.ts`。
 
 模式：`extract`、`export`、`exportRaw`、`dump`、`info`、`live2d`、`splitObjects`、`animator`。Live2D/模型模式按上游要求加载辅助对象，类型选择由模式决定。
+
+Texture2D、Texture2DArray、Sprite 导出 PNG 时可设 `pngCompressionLevel: 1`，用更大的文件换取更快的无损压缩。范围为 0–9，省略时保留上游 PNG 默认设置；不改变纹理解码及像素，也不影响其他图片格式或 Live2D/模型导出。可逐次请求覆盖，下一次调用会恢复实例默认值。
+
+Texture2D 导出直接复用解码缓冲区直到编码完成，省去一次整图复制；Switch 纹理保留上游裁剪路径。多资源并行导出时，将 ImageSharp 图片内部并行限制为 1，资源间的并行数仍由 `maxExportTasks` 控制。
+
+并行导出前，同一序列化文件内的内嵌纹理、纹理数组层和音频统一使用同一个 Reader，让上游的 Reader 锁真正保护共享文件流，避免并发 seek 时读到其他资源的字节。`npm run test:bridge` 使用 .NET SDK 验证这一共享流并发场景。
 
 资源类型：`all`、`tex2d`、`tex2dArray`、`sprite`、`textasset`、`monobehaviour`、`font`、`shader`、`movietexture`、`audio`、`video`、`mesh`、`animator`。
 

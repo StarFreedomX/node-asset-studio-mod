@@ -44,6 +44,8 @@ export interface ExportAssetsDefaultConfig {
     logLevel?: "verbose" | "debug" | "info" | "warning" | "error";
     logOutput?: "console" | "file" | "both";
     imageFormat?: "none" | "jpg" | "png" | "bmp" | "tga" | "webp";
+    /** 0–9 for Texture2D/Texture2DArray/Sprite PNG exports. Lower is faster/larger; omitted keeps upstream settings. */
+    pngCompressionLevel?: number;
     audioFormat?: "none" | "wav";
     l2dGroupOption?: "container" | "fileName" | "modelName";
     l2dMotionMode?: "monoBehaviour" | "animationClip";
