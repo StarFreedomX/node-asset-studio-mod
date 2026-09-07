@@ -188,3 +188,14 @@ Vulkan shader disassembly uses `spirv-tools@20.4.1`, the WASM build from
 The unmodified JavaScript glue and WASM are included in `dist/vendor`;
 `dist/licenses/spirv-tools-LICENSE` contains its Apache-2.0 license.
 Our adapter supplies local WASM bytes explicitly, with no runtime download.
+
+## FBX model conversion — Assimp / assimpjs
+
+The unmodified WASM and glue from [repalash/assimpjs](https://github.com/repalash/assimpjs/tree/cf1dce885402a2f96c3e029fd5384b5008b43543)
+are bundled locally. Assimp is BSD-3-Clause and assimpjs is MIT;
+full licenses ship as `dist/licenses/LICENSE-assimp` and `LICENSE-assimpjs`.
+Pinned hashes, Assimp source revision and adaptation notes are in `vendor/assimp`.
+
+The vendored MIT texture decoder also includes BC4/5/6H and PVRTC sources from
+the same pinned texture2ddecoder revision listed above. Format layouts and Unity
+object semantics are adapted from AssetStudioMod v0.19.0 (MIT); no C# runtime is used.

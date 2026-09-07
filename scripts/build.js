@@ -94,6 +94,49 @@ await build({
             };
           },
         );
+        b.onLoad(
+          { filter: /unityfs[\\/]classes[\\/]mesh\.js$/ },
+          async (args) => {
+            let contents = (await readFile(args.path, "utf8")).replaceAll(
+              "\r\n",
+              "\n",
+            );
+            const start = contents.indexOf("function getVertexSize("),
+              end = contents.indexOf("function getVertexFormatReader(", start);
+            if (start < 0 || end < 0)
+              throw Error("Mesh vertex format adapter needs review");
+            contents =
+              contents.slice(0, start) +
+              "const getVertexSize = vertexComponentSize;\n\n" +
+              contents.slice(end);
+            const external = "await requestExternalData(this.streamData)";
+            if (!contents.includes(external))
+              throw Error("Mesh resource adapter needs review");
+            contents = contents.replace(
+              external,
+              "this.reader.assetFile.context.resolveResource(this.streamData.path, this.streamData.offset, this.streamData.size)",
+            );
+            const trianglesStart = contents.indexOf("    getTriangles() {"),
+              trianglesEnd = contents.indexOf(
+                "    initMSkin()",
+                trianglesStart,
+              );
+            if (trianglesStart < 0 || trianglesEnd < 0)
+              throw Error("Mesh triangulation adapter needs review");
+            contents =
+              contents.slice(0, trianglesStart) +
+              "    getTriangles() { this.indices = this.subMeshes.flatMap(sub => meshTriangles(this, sub)); }\n\n" +
+              contents.slice(trianglesEnd);
+            return {
+              contents:
+                "import {vertexComponentSize,meshTriangles} from " +
+                JSON.stringify(path.join(root, "src/mesh-layout.ts")) +
+                ";\n" +
+                contents,
+              loader: "js",
+            };
+          },
+        );
         // Our outer Node Worker provides concurrency; the upstream browser pool is unused.
         b.onResolve({ filter: /\?worker&inline$/ }, () => ({
           path: "browser-worker-disabled",
@@ -181,3 +224,16 @@ await copyFile(
   path.join(root, "vendor/smol-v/LICENSE"),
   path.join(root, "dist/licenses/smol-v-LICENSE"),
 );
+await copyFile(
+  path.join(root, "vendor/assimp/assimp.cjs"),
+  path.join(root, "dist/vendor/assimp.cjs"),
+);
+await copyFile(
+  path.join(root, "vendor/assimp/assimp.wasm"),
+  path.join(root, "dist/vendor/assimp.wasm"),
+);
+for (const file of ["LICENSE-assimp", "LICENSE-assimpjs"])
+  await copyFile(
+    path.join(root, "vendor/assimp", file),
+    path.join(root, "dist/licenses", file),
+  );

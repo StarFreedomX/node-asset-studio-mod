@@ -75,7 +75,7 @@ This replacement does not provide full AssetStudio feature parity.
 
 Validated with `res014089`, Unity `2022.3.62f1`: four Texture2D assets produce PNGs whose decoded RGBA pixels exactly match the former .NET exports. Bundle extraction, companion resource round-trip, raw bytes and TypeTree dumps are also tested. The garupa-unpacker migration regression additionally covers Shader, MonoBehaviour and TextAsset; see below.
 
-Removed: .NET paths and installer, C# bridge, FBX, Animator/splitObjects, MovieTexture/Texture2DArray conversion, scene grouping, external assemblies, compression overrides, old Live2D/FBX-specific options, and file logging. Unsupported options fail explicitly instead of being ignored. The TypeScript API describes the current supported configuration.
+Removed: .NET paths and installer, C# bridge, scene grouping, external assemblies, compression overrides, unsupported legacy Live2D/FBX options, and file logging. FBX supports fbxAnimation and fbxScaleFactor. Unsupported options fail explicitly instead of being ignored. The TypeScript API describes the current supported configuration.
 
 `assetType` accepts one type or an array; `all` means the resource types listed by this API, not every Unity object. Filters support name/container, PathID, text and regex. Text overrides PathID, which overrides name/container filters. Default grouping is `container`; alternatives are `none`, `type`, `containerFull`, `fileName`. Names can use `assetName`, `assetName_pathID`, or `pathID`. Existing files fail unless `overwrite: true`; default asset-name collisions within a request append a PathID to subsequent objects; explicit ID collisions still fail. Asset path traversal and symlink output subdirectories are rejected.
 
@@ -123,7 +123,7 @@ npm run build
 npm test
 npm pack
 # Run after inspecting the generated tarball:
-npm publish ./node-asset-studio-mod-js-0.1.2.tgz --access public
+npm publish ./node-asset-studio-mod-js-0.1.3.tgz --access public
 ```
 
 `npm pack` rebuilds through `prepack`. Use an unused package version for each release. Maintain the three implementations as worktrees of one Git repository; see [worktree maintenance](WORKTREES.md). Dependencies and runtime files belong to each working directory.
@@ -153,8 +153,37 @@ The garupa-unpacker 10.1.0.240 → 10.1.0.250 workflow passes using an installed
 package: 11 bundle inputs, 7 successful resource items, 21 final changed files,
 and no raw-export fallback. See [the regression record](COMPATIBILITY.md).
 This validates Shader, MonoBehaviour, Texture2D and TextAsset for that workflow;
-FBX/Animator, MovieTexture and Texture2DArray conversions remain unimplemented.
+See below for the additional model, texture-array and movie support in 0.1.3.
 
 To exercise the real Shader integration and offline package checks, also set
 `ASSET_STUDIO_TEST_SHADER_INPUT` to the gacha1937 bundle when running
 `test:integration` and `test:package`. Real game resources are not committed.
+
+
+## Model and additional texture support (0.1.3)
+
+`readAssets(input, { mode: 'animator', fbxAnimation: 'auto' })` returns named
+FBX bytes in `files`. Input may be a directory, file or Buffer. `splitObjects`
+exports one FBX for each root GameObject with meshes. Default `all` also includes
+Animator. Exports include hierarchy, geometry, UVs, common material textures,
+skin weights and static blend shapes. Transform animations support streamed,
+dense, constant and ordinary position/rotation/scale curves, baked at source
+sample rate. `fbxAnimation: 'all'` tries every loaded clip; `skip` explicitly
+exports static models. `fbxScaleFactor` adds a scale parent (default 1).
+
+Texture2DArray exports the base mip of each layer as `name_1.png`, etc., or raw
+`.tex` bytes with `imageFormat: 'none'`. Old MovieTexture preserves its `.ogv`
+bytes. Added codecs include BC4/5/6H, PVRTC, half/float and packed integer formats.
+All codecs and Assimp WASM ship locally, without native executables or .NET.
+
+Remaining limitations are explicit: Humanoid retargeting, blend-shape animation,
+packed legacy rotations/property animation, weighted legacy tangents and non-ZXY Euler curves and FMOD-dependent audio are not
+implemented. Unsupported animations fail rather than silently exporting static
+FBX. Stripped optimized skeletons are not reconstructed; missing bones or
+external references fail. Custom shader/constraint/script behavior is not baked.
+Real CDN models passed FBX readback; animation readback uses synthetic Transform
+fixtures because the downloaded real clips contain Humanoid/morph bindings.
+
+Set `ASSET_STUDIO_TEST_MODEL_INPUT` to the fixture directory containing
+`star3d/...` to run real model checks with `npm test` and `npm run test:package`.
+See [COMPATIBILITY.md](COMPATIBILITY.md) for exact samples and results.

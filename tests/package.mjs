@@ -42,6 +42,13 @@ test("published package installs offline without lifecycle downloads and runs wi
     assert.ok(
       pack.files.every((f) => !/(^|\/)(bridge|dotnet)(\/|$)/i.test(f.path)),
     );
+    for (const name of [
+      "dist/vendor/assimp.cjs",
+      "dist/vendor/assimp.wasm",
+      "dist/licenses/LICENSE-assimp",
+      "dist/licenses/LICENSE-assimpjs",
+    ])
+      assert.ok(pack.files.some((f) => f.path === name));
     const consumer = path.join(temporary, "consumer");
     await mkdir(consumer);
     await writeFile(
@@ -91,6 +98,10 @@ test("published package installs offline without lifecycle downloads and runs wi
       new URL("./helpers/png.mjs", import.meta.url),
       path.join(consumer, "png.mjs"),
     );
+    await copyFile(
+      new URL("./helpers/serialized.mjs", import.meta.url),
+      path.join(consumer, "serialized.mjs"),
+    );
     const astcGolden = JSON.parse(
       await readFile(
         new URL("./fixtures/astc-comment-banner-pixels.json", import.meta.url),
@@ -104,6 +115,7 @@ test("published package installs offline without lifecycle downloads and runs wi
       import { readAssets } from ${JSON.stringify(pack.name)};
       import { createHash } from 'node:crypto';
       import { rgbaPng } from './png.mjs';
+      import {serialized,textureArray} from './serialized.mjs';
       const result = await readAssets(await readFile(process.env.FIXTURE), { unityVersion: '2022.3.62f1', log: false });
       assert.equal(result.exportedCount, 4);
       assert.ok(result.files.every(f => Buffer.from(f.data).subarray(0, 8).toString('hex') === '89504e470d0a1a0a'));
@@ -119,6 +131,8 @@ test("published package installs offline without lifecycle downloads and runs wi
         assert.match(Buffer.from(file.data).toString(), /OpEntryPoint Vertex/);
         assert.match(Buffer.from(file.data).toString(), /#ifdef VERTEX/);
       }
+      const array=await readAssets(serialized([{type:187,data:textureArray({data:Buffer.alloc(32,255)})}]),{log:false});assert.equal(array.files.length,2);assert.deepEqual(array.files.map(f=>f.path),['array_1.png','array_2.png']);
+      if(process.env.MODEL_FIXTURE){const model=await readAssets(process.env.MODEL_FIXTURE,{unityVersion:'2022.3.62f1',mode:'animator',log:false});assert.equal(model.exportedCount,1);assert.ok(model.files[0].path.endsWith('.fbx'));assert.equal(Buffer.from(model.files[0].data).subarray(0,20).toString(),'Kaydara FBX Binary  ');}
       console.log(JSON.stringify({ assets: result.assetCount, pngs: result.files.length }));
     `,
     );
@@ -131,6 +145,14 @@ test("published package installs offline without lifecycle downloads and runs wi
           PATH: emptyPath,
           DOTNET_ROOT: path.join(temporary, "no-dotnet"),
           FIXTURE: path.resolve(input),
+          ...(process.env.ASSET_STUDIO_TEST_MODEL_INPUT
+            ? {
+                MODEL_FIXTURE: path.resolve(
+                  process.env.ASSET_STUDIO_TEST_MODEL_INPUT,
+                  "star3d/character/head/015_cos_live_event_244_013_ur",
+                ),
+              }
+            : {}),
           ...(process.env.ASSET_STUDIO_TEST_SHADER_INPUT
             ? {
                 SHADER_FIXTURE: path.resolve(

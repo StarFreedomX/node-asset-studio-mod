@@ -70,7 +70,7 @@ try {
 | 功能               | 当前行为                                                                                                       |
 | ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `info` / `inspect` | 返回选中对象的名称、类型、容器、大小和 PathID                                                                  |
-| `export`           | Texture2D / Sprite 转 PNG；Shader 转 ShaderLab 检查文本；TextAsset、Font、Mesh OBJ、MonoBehaviour JSON、VideoClip、部分 AudioClip 由引擎导出 |
+| `export`           | Texture2D / Texture2DArray / Sprite 转 PNG；Shader 转 ShaderLab 检查文本；TextAsset、Font、Mesh OBJ、MonoBehaviour JSON、MovieTexture OGV、VideoClip、部分 AudioClip 由引擎导出 |
 | `extract`          | 解出 Bundle 内部文件，包括伴随资源                                                                             |
 | `exportRaw`        | 导出 serialized object 的原始字节，**不附加外部资源流**；完整资源请用 `extract`                                |
 | `dump`             | 依赖文件自带 TypeTree，返回 JSON；无 TypeTree 时明确失败                                                       |
@@ -80,7 +80,7 @@ try {
 
 用户提供的 `res014089`（Unity `2022.3.62f1`）已实测：4 个 Texture2D，4 张 PNG 与此前 .NET 导出结果的解码 RGBA 像素完全一致；还验证了 Bundle 解包、外部资源回读、TypeTree 和原始字节导出。另已实测 garupa-unpacker 的 10.1.0.240 → 10.1.0.250 全类型迁移：11 个新旧包、7 个资源项全部通过，最终写出 21 个差异文件。Shader、MonoBehaviour、Texture2D 和 TextAsset 均走正常转换，无 `.bin` 兜底。详见 [迁移回归记录](COMPATIBILITY.md)。
 
-已移除 .NET 路径选项、安装器和 C# bridge。FBX、Animator、splitObjects、MovieTexture / Texture2DArray 转换、场景分组、外部程序集加载、压缩算法覆盖、旧 Live2D/FBX 专用选项及文件日志不支持。传入旧选项会报错，不会静默忽略。
+已移除 .NET 路径选项、安装器和 C# bridge。场景分组、外部程序集加载、压缩算法覆盖及文件日志不支持。FBX 支持 `fbxAnimation` 和 `fbxScaleFactor`；其他旧 FBX/Live2D 专用选项会明确报错。
 
 `assetType` 可为单值或数组；`all` 选择 API 已列举的资源类型，不代表全部 Unity 对象。过滤支持 `filterByName` / `filterByContainer`、`filterByPathID`、`filterByText` 和 `filterWithRegex`；文本过滤优先于 PathID，PathID 优先于名称/容器。
 
@@ -97,8 +97,7 @@ GLSL/Metal 源码及 Vulkan SMOL-V → SPIR-V 反汇编。Shader 和无名 MonoB
 分别使用 ShaderLab 名称和同文件 MonoScript 类名，支持名称过滤。
 
 和原 AssetStudio 转换语义一致，`.shader` 是供检查的可读文本，不能当成可重新编译的原始 Shader；
-DXBC 子程序仍输出原转换器的“不支持反汇编”注释。此版本没有实现 FBX/Animator、
-MovieTexture、Texture2DArray 转换，不能据本次业务回归宣称所有引擎功能完全等价。
+DXBC 子程序仍输出原转换器的“不支持反汇编”注释。FBX 的支持范围见下文，不能据一次业务回归宣称所有引擎功能完全等价。
 
 ## 开发与验证
 
@@ -142,7 +141,7 @@ npm run build
 npm test
 npm pack
 # 检查生成的压缩包后再发布：
-npm publish ./node-asset-studio-mod-js-0.1.2.tgz --access public
+npm publish ./node-asset-studio-mod-js-0.1.3.tgz --access public
 ```
 
 `npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。三个实现使用同一 Git 仓库的 worktree 维护，目录和命令见 [worktree 维护说明](WORKTREES.md)。依赖和下载文件由各工作目录分别保存。
@@ -150,3 +149,38 @@ npm publish ./node-asset-studio-mod-js-0.1.2.tgz --access public
 ## 分支依赖隔离
 
 建议为 CLI、pipe、JS 使用独立 worktree，并在各目录执行 `pnpm install`，避免复用 `node_modules`。Git 切换分支不会清除 pnpm 的 `ignoredBuilds` 状态。依赖构建许可已写入本分支的 `pnpm-workspace.yaml`。本分支明确允许 esbuild 构建脚本。
+
+
+## 0.1.3：模型、纹理数组和旧视频
+
+```ts
+const exporter = createExporter({ unityVersion: '2022.3.62f1', log: false });
+try {
+  // 输入可为目录、单个 Bundle 路径或已收到的 Buffer。
+  const models = await exporter.readAssets('/path/to/bundles', {
+    mode: 'animator',
+    fbxAnimation: 'auto',
+  });
+  for (const { path, data } of models.files) {
+    // path 保留文件名，data 为 FBX 字节，可直接交给下游或写入对象存储。
+  }
+  const objects = await exporter.readAssets('/path/to/props', { mode: 'splitObjects' });
+} finally {
+  await exporter.close();
+}
+```
+
+- `animator`：按 Animator 导出其 GameObject 下的模型层级；默认 `all` 也包含 Animator。
+- `splitObjects`：每个根 GameObject 层级导出一个 FBX，忽略不含网格的根。
+- FBX 包含网格、UV、材质、支持的嵌入纹理、骨骼权重和静态 blend shape。普通 Transform 动画支持位置、旋转、缩放及 streamed/dense/constant 曲线，按源采样率烘焙。`auto` 读取 Animator Controller 引用，`all` 尝试同次加载的所有动画，`skip` 明确只导静态模型。
+- `fbxScaleFactor` 是附加模型父节点缩放，默认 1。没有仿真 Unity 自定义 Shader、约束或运行时脚本。
+- Texture2DArray 每层输出 `名称_1.png`、`名称_2.png` 等文件；读取每层基础 mip，正确跳过其余 mip；`imageFormat: 'none'` 输出各层基础 mip 原始 `.tex`。
+- 旧 MovieTexture 原样输出 `.ogv`，不做视频转码；现代 VideoClip 继续使用既有导出路径。Garupa 清单中下载到的视频包实际使用 TextAsset。
+
+**尚未等价的部分**：Humanoid 肌肉重定向、表情动画、旧压缩旋转/属性动画、加权切线及非 ZXY 旧欧拉曲线、需要 FMOD 的音频。
+遇到这些动画会报 `UNSUPPORTED_OPERATION`，不会成功返回静态 FBX 冒充完整动画。
+没有恢复优化骨架中被剥离的 Transform；缺少骨骼、外部引用或资源时明确失败。
+动画支持已用合成曲线读回验证；清单中的真实动画为 Humanoid/表情曲线，不能当作已通过的普通骨骼动画样本。
+
+安装包包含本地 WASM，无安装脚本、运行时下载、.NET、原生可执行文件或子进程。
+真实模型回归可设置 `ASSET_STUDIO_TEST_MODEL_INPUT` 为本地缓存目录（其下保留 `star3d/...` 路径），再运行 `pnpm test` 和 `pnpm test:package`。

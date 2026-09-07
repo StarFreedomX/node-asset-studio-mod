@@ -1,6 +1,6 @@
 {
   "name": "node-asset-studio-mod-js",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Unity asset inspection and export in Node.js worker threads with JavaScript/WASM; no .NET runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

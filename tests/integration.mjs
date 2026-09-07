@@ -261,14 +261,15 @@ test("res014089: limits and removed engine options fail explicitly and allow rec
         code: "LIMIT_EXCEEDED",
       });
     }
-    for (const options of [{ fbxScaleFactor: 1 }, { dotnetPath: "/missing" }]) {
+    for (const options of [{ fbxBoneSize: 1 }, { dotnetPath: "/missing" }]) {
       await assert.rejects(exporter.inspect(input, options), {
         code: "UNSUPPORTED_OPTION",
       });
     }
-    await assert.rejects(exporter.readAssets(input, { mode: "animator" }), {
-      code: "INVALID_CONFIG",
-    });
+    assert.equal(
+      (await exporter.readAssets(input, { mode: "animator" })).exportedCount,
+      0,
+    );
     await assert.rejects(exporter.readAssets(input, { imageFormat: "jpg" }), {
       code: "INVALID_CONFIG",
     });

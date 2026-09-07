@@ -7,6 +7,8 @@ const result = spawnSync(
   emcc,
   [
     "vendor/astc/astc.cpp",
+    "vendor/astc/bcn.cpp",
+    "vendor/astc/pvrtc.cpp",
     "vendor/astc/interface.cpp",
     "-Ivendor/astc",
     "-O3",
@@ -19,7 +21,7 @@ const result = spawnSync(
     "-sENVIRONMENT=node,worker",
     "-sFILESYSTEM=0",
     "-sALLOW_MEMORY_GROWTH=1",
-    '-sEXPORTED_FUNCTIONS=["_decode_astc_rgba","_malloc","_free"]',
+    '-sEXPORTED_FUNCTIONS=["_decode_astc_rgba","_decode_extra_rgba","_malloc","_free"]',
     '-sEXPORTED_RUNTIME_METHODS=["HEAPU8"]',
     "-sINCOMING_MODULE_JS_API=[]",
     "-o",

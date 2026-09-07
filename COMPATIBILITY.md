@@ -68,5 +68,44 @@ node scripts/test-garupa-migration.mjs
 
 本次确认了该项目实际用到的 Shader、MonoBehaviour、Texture2D、TextAsset 迁移流程。
 `.shader` 沿用原转换器的检查文本语义，并非可重新编译的原始 Shader；DXBC 仍保留原转换器“不支持反汇编”的说明。
-FBX/Animator、MovieTexture、Texture2DArray 转换等尚未实现，不能把本次业务通过表述为整个 AssetStudio 引擎功能完全等价。
+以上是 0.1.2 的 Shader 回归范围；0.1.3 新增的模型等能力见下文，仍不能表述为整个引擎功能完全等价。
 音频解析不在这批样本中；ACB/HCA 后处理仍由调用项目负责。
+
+
+# 0.1.3 扩展回归（2026-09-07）
+
+样本按用户提供的 Release 10.1.0.230 Android AssetBundleInfo 清单选择并下载。
+Unity 版本覆盖参数为 `2022.3.62f1`。真实游戏数据及临时检查输出保持忽略，不随 Git/npm 发布。
+
+| 清单资源 | 模式 | FBX 数量 | 每个 FBX 骨骼数 | 每个 FBX 嵌入纹理数 |
+| --- | --- | ---: | --- | --- |
+| star3d/character/head/015_cos_live_event_244_013_ur | animator | 1 | 3 | 0 |
+| star3d/character/costume/016_cos_collabo_i_1 | animator | 2 | 78、78 | 0、1 |
+| star3d/props/102_01 | splitObjects | 2 | 0、0 | 1、1 |
+
+每个 FBX 均由 FBX 导入器重新读回，校验网格、骨骼和嵌入纹理。
+头部与服装包有多个独立层级，不属于所选 Animator 的其他根节点不会混入该 FBX。
+
+发现并修复：Unity 2019+ 顶点格式编号变化导致的骨骼索引步长错误；四边形第二个三角形重复；
+baseVertex 遗漏；读取流式 Mesh 时错误走浏览器资源路径；FBX 根节点丢失；
+转换器把动画关键帧毫秒当成秒，导致动画只剩起始帧。
+合成动画验证关键帧时间与位移末值，合成模型覆盖权重、UV、变换、静态 blend shape，
+而不是只断言文件存在。
+
+清单中另下载了 `star3d/motions/characterunique/ch015/001`（Humanoid 肌肉曲线）
+和 `star3d/motions/lipsync/cute`（表情曲线）。这两类动画尚未实现，明确报
+`UNSUPPORTED_OPERATION`；不将它们计为动画转换成功。
+`fbxAnimation: 'skip'` 可在调用方明确选择后只导出静态模型。
+
+未在这批真实资源中发现 Texture2DArray/MovieTexture；使用独立构造的 Unity 序列化文件，
+验证 2018/2022 数组布局、mip 步长、伴随流偏移、串并行 PNG、文件名、预算及损坏输入，
+以及旧 MovieTexture OGV 字节保留。下载的视频样本实际是 TextAsset。
+新增 BC4/5/6H、PVRTC、半精度/浮点和整数纹理路径有合成解码与边界测试；
+不把合成用例表述为这些格式均经过真实游戏资源验证。
+
+41 项单元/真实模型测试通过；res014089、卡池 Shader 集成及离线安装包测试通过。
+安装包在空 PATH 和无效 DOTNET_ROOT 下导出 PNG、Shader、Texture2DArray 和真实模型 FBX。
+原业务 diff 240→250 通过 `scripts/test-garupa-migration.mjs` 重跑：11 个输入、7/7 成功、21 个最终差异文件，零警告、零兜底。
+
+仍缺少 Humanoid 重定向、表情动画、旧压缩旋转/属性动画、加权切线及非 ZXY 旧欧拉曲线、优化骨架还原及部分 FMOD 音频。
+这次增加了可用的转换能力，尚未达到原引擎全功能等价。

@@ -1,3 +1,15 @@
+import { addAnimation } from "./animation.js";
+import { buildModel, ObjectResolver } from "./model.js";
+import { convertModel } from "./fbx.js";
+import { registerExtraTextureFormats } from "./texture-formats.js";
+registerExtraTextureFormats();
+import { Texture2DArray, MovieTexture } from "./asset-parsers.js";
+import { textureArrayLayers } from "./texture-array.js";
+import { convertTexture } from "./texture-engine.js";
+import { registerClass } from "unityfs-js";
+registerClass(187, "Texture2DArray", Texture2DArray);
+registerClass(152, "MovieTexture", MovieTexture);
+
 import { convertShader } from "./shader.js";
 import type { TextureJob } from "./texture-engine.js";
 import { load, type AssetManager, type ObjectInfo } from "unityfs-js";
@@ -41,6 +53,9 @@ const classes: Record<string, string> = {
 };
 const exportClasses = new Set([
   "Shader",
+  "Texture2DArray",
+  "MovieTexture",
+  "Animator",
   "Texture2D",
   "Sprite",
   "TextAsset",
@@ -72,6 +87,8 @@ const options = new Set([
   "maxTexturePixels",
   "maxExportTasks",
   "resourceFiles",
+  "fbxAnimation",
+  "fbxScaleFactor",
 ]);
 function fail(code: string, message: string): never {
   throw new AssetStudioError(code, message);
@@ -94,6 +111,8 @@ function validate(c: Config) {
     "dump",
     "extract",
     "live2d",
+    "animator",
+    "splitObjects",
   ]);
   oneOf("group", c.group, [
     "none",
@@ -109,6 +128,14 @@ function validate(c: Config) {
   ]);
   oneOf("imageFormat", c.imageFormat, ["png", "none"]);
   oneOf("audioFormat", c.audioFormat, ["none", "wav"]);
+  oneOf("fbxAnimation", c.fbxAnimation, ["auto", "skip", "all"]);
+  if (
+    c.fbxScaleFactor !== undefined &&
+    (typeof c.fbxScaleFactor !== "number" ||
+      !Number.isFinite(c.fbxScaleFactor) ||
+      c.fbxScaleFactor <= 0)
+  )
+    fail("INVALID_CONFIG", "fbxScaleFactor must be positive");
   oneOf("logLevel", c.logLevel, [
     "verbose",
     "debug",
@@ -448,12 +475,26 @@ export async function execute(
         "No Unity serialized files could be loaded",
       );
     if (mode !== "extract") {
+      const resolver = new ObjectResolver(
+        managers.flatMap((m: any) =>
+          m.assetFiles.map((file: any) => ({
+            file,
+            manager: m,
+            name: sources.get(file.objects[0]) ?? "",
+          })),
+        ),
+      );
       const requested = Array.isArray(c.assetType)
         ? c.assetType
         : [c.assetType ?? "all"];
-      const selectedClasses = requested.includes("all")
-        ? Object.values(classes)
-        : requested.map((t) => classes[t]);
+      const selectedClasses =
+        mode === "animator"
+          ? ["Animator"]
+          : mode === "splitObjects"
+            ? ["GameObject"]
+            : requested.includes("all")
+              ? Object.values(classes)
+              : requested.map((t) => classes[t]);
       const selected: {
         manager: AssetManager;
         object: ObjectInfo;
@@ -462,6 +503,16 @@ export async function execute(
       for (const m of managers)
         for (const o of m.getObjectInfos())
           if (selectedClasses.includes(o.className)) {
+            if (mode === "splitObjects") {
+              const t = resolver
+                .components(o)
+                .find(
+                  (x: any) =>
+                    x.className === "Transform" ||
+                    x.className === "RectTransform",
+                );
+              if (!t || BigInt(t.object.father?.pathID ?? 0) !== 0n) continue;
+            }
             const object = o.object; // Patched upstream getter throws instead of replacing failed objects with {}.
             const container = m.getContainer(o) as any;
             // Match AssetStudio's names without invoking upstream's browser-only PPtr resolver.
@@ -479,6 +530,8 @@ export async function execute(
               if (script?.className === "MonoScript")
                 assetName = script.object.className || assetName;
             }
+            if (o.className === "Animator")
+              assetName = resolver.gameObject(o)?.object.name || assetName;
             const streamSize = Number(object?.streamData?.size ?? 0);
             const info: AssetInfo = {
               name: assetName,
@@ -582,12 +635,136 @@ export async function execute(
               fail("UNSUPPORTED_OPERATION", `No TypeTree for ${info.name}`);
             emitAssetFile(info, ".json", json(tree));
           } else {
-            if (!exportClasses.has(info.type))
+            if (!exportClasses.has(info.type) && mode !== "splitObjects")
               fail(
                 "UNSUPPORTED_OPERATION",
                 `Conversion of ${info.type} is not supported; use exportRaw or dump`,
               );
             const obj = o.object;
+            if (info.type === "Animator" || mode === "splitObjects") {
+              const model = await buildModel(o, resolver, maxPixels);
+              if (
+                mode === "splitObjects" &&
+                !model.builder.document.meshes.length
+              )
+                continue;
+              const clips = new Set<any>();
+              const collect = (
+                controller: any,
+                seen = new Set<any>(),
+                overrides = new Map<any, any>(),
+              ) => {
+                if (!controller) return;
+                if (seen.has(controller))
+                  throw Error("Animator controller cycle");
+                seen.add(controller);
+                const value = controller.object;
+                if (controller.className === "AnimatorOverrideController") {
+                  for (const pair of value.clips) {
+                    const original = resolver.resolve(
+                        controller,
+                        pair.originalClip,
+                      ),
+                      replacement = resolver.resolve(
+                        controller,
+                        pair.overrideClip,
+                      );
+                    if (original && replacement && !overrides.has(original))
+                      overrides.set(original, replacement);
+                  }
+                  collect(
+                    resolver.resolve(controller, value.controller),
+                    seen,
+                    overrides,
+                  );
+                } else
+                  for (const p of value.animationClips ?? []) {
+                    const clip = resolver.resolve(controller, p);
+                    if (clip) clips.add(overrides.get(clip) ?? clip);
+                  }
+                seen.delete(controller);
+              };
+              if (c.fbxAnimation === "all") {
+                for (const manager of managers)
+                  for (const info of manager.getObjectInfos())
+                    if (info.className === "AnimationClip") clips.add(info);
+              } else if (
+                c.fbxAnimation !== "skip" &&
+                o.className === "Animator"
+              )
+                collect(resolver.resolve(o, o.object.controller));
+              for (const clip of clips)
+                addAnimation(model.builder, model.paths, clip.object);
+              if (c.fbxScaleFactor !== undefined) {
+                const nodes = model.builder.document.nodes,
+                  root = nodes.length;
+                nodes.push({
+                  name: "Scale",
+                  scale: [c.fbxScaleFactor, c.fbxScaleFactor, c.fbxScaleFactor],
+                  children:
+                    nodes[model.builder.document.scenes[0].nodes[0]].children,
+                });
+                nodes[model.builder.document.scenes[0].nodes[0]].children = [
+                  root,
+                ];
+              }
+              const converted = await convertModel(
+                model.builder.finish(),
+                name(info.name) + ".glb",
+              );
+              for (const file of converted) {
+                if (file.path.endsWith(".fbx"))
+                  emitAssetFile(info, ".fbx", file.data);
+                else
+                  emitFile(
+                    relative(name(info.name) + "/" + file.path),
+                    file.data,
+                  );
+              }
+              exportedCount++;
+              progress("export", i + 1, selected.length);
+              continue;
+            }
+            if (info.type === "Texture2DArray") {
+              const layers = textureArrayLayers(
+                obj,
+                (p, o, s) => m.resolveResource(p, o, s),
+                maxPixels,
+              );
+              const count = c.imageFormat === "none" ? 1 : concurrency;
+              for (let start = 0; start < layers.length; start += count) {
+                const batch = await Promise.all(
+                  layers.slice(start, start + count).map((layer) =>
+                    c.imageFormat === "none"
+                      ? layer.data
+                      : encodeTexture && count > 1
+                        ? encodeTexture({
+                            ...layer,
+                            data: Uint8Array.from(layer.data),
+                          })
+                        : convertTexture(layer),
+                  ),
+                );
+                for (let j = 0; j < batch.length; j++) {
+                  const layer = start + j + 1;
+                  emitAssetFile(
+                    {
+                      ...info,
+                      name: info.name + "_" + layer,
+                      pathId:
+                        c.filenameFormat === "pathID"
+                          ? info.pathId + "_" + layer
+                          : info.pathId,
+                    },
+                    c.imageFormat === "none" ? ".tex" : ".png",
+                    batch[j],
+                  );
+                  exportedCount++;
+                }
+              }
+              progress("export", i + 1, selected.length);
+              continue;
+            }
             if (info.type === "Texture2D") {
               if (
                 !Number.isSafeInteger(obj.width) ||
@@ -622,7 +799,10 @@ export async function execute(
               }
             }
             let data: unknown, extension: string;
-            if (info.type === "Shader") {
+            if (info.type === "MovieTexture") {
+              data = obj.movieData;
+              extension = ".ogv";
+            } else if (info.type === "Shader") {
               data = Buffer.from(await convertShader(obj));
               extension = ".shader";
             } else if (info.type === "TextAsset") {

@@ -1,3 +1,5 @@
+import { registerExtraTextureFormats } from "./texture-formats.js";
+registerExtraTextureFormats();
 import { DecoderManager } from "../node_modules/unityfs-js/decoders/DecoderManager.js";
 import { rgbaToPng } from "../node_modules/unityfs-js/unityfs/classes/texture2d/reader.js";
 import { decodeAstcRgba } from "./texture-codecs.js";
@@ -32,3 +34,5 @@ export async function convertTexture(job: TextureJob): Promise<Uint8Array> {
   });
   return Uint8Array.from(png.raw);
 }
+
+export { decodePackedPixels, decodeSpecialPixels } from "./texture-formats.js";

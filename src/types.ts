@@ -20,12 +20,16 @@ export type ExportMode =
   | "exportRaw"
   | "dump"
   | "info"
-  | "live2d";
+  | "live2d"
+  | "animator"
+  | "splitObjects";
 
 export type AssetType = (typeof AssetTypes)[number];
 
 export interface ExportAssetsDefaultConfig {
   mode?: ExportMode;
+  fbxAnimation?: "auto" | "skip" | "all";
+  fbxScaleFactor?: number;
   /** Custom Node.js worker module; normally omitted. */
   workerPath?: string;
   /** Default request timeout including startup; 0 disables it. */
