@@ -127,3 +127,7 @@ npm publish ./node-asset-studio-mod-bridge-0.1.0.tgz --access public
 ```
 
 `npm pack` rebuilds through `prepack`. Use an unused package version for each release. Prefer separate checkouts when building multiple implementations; generated dependencies and runtime files are not switched by Git.
+
+## Separate branch dependencies
+
+Use a separate worktree for CLI, pipe and JS and run `pnpm install` in each directory. Avoid sharing `node_modules`: switching Git branches does not clear pnpm’s `ignoredBuilds` state. Dependency build permissions are recorded in this branch’s `pnpm-workspace.yaml`. This branch requires no dependency build scripts; its own postinstall still runs normally.
