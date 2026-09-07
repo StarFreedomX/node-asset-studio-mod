@@ -141,7 +141,7 @@ npm run build
 npm test
 npm pack
 # 检查生成的压缩包后再发布：
-npm publish ./node-asset-studio-mod-js-0.1.3.tgz --access public
+npm publish ./node-asset-studio-mod-js-0.1.4.tgz --access public
 ```
 
 `npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。三个实现使用同一 Git 仓库的 worktree 维护，目录和命令见 [worktree 维护说明](WORKTREES.md)。依赖和下载文件由各工作目录分别保存。
@@ -151,7 +151,7 @@ npm publish ./node-asset-studio-mod-js-0.1.3.tgz --access public
 建议为 CLI、pipe、JS 使用独立 worktree，并在各目录执行 `pnpm install`，避免复用 `node_modules`。Git 切换分支不会清除 pnpm 的 `ignoredBuilds` 状态。依赖构建许可已写入本分支的 `pnpm-workspace.yaml`。本分支明确允许 esbuild 构建脚本。
 
 
-## 0.1.3：模型、纹理数组和旧视频
+## 0.1.4：模型与动画、纹理数组和旧视频
 
 ```ts
 const exporter = createExporter({ unityVersion: '2022.3.62f1', log: false });
@@ -172,15 +172,24 @@ try {
 
 - `animator`：按 Animator 导出其 GameObject 下的模型层级；默认 `all` 也包含 Animator。
 - `splitObjects`：每个根 GameObject 层级导出一个 FBX，忽略不含网格的根。
-- FBX 包含网格、UV、材质、支持的嵌入纹理、骨骼权重和静态 blend shape。普通 Transform 动画支持位置、旋转、缩放及 streamed/dense/constant 曲线，按源采样率烘焙。`auto` 读取 Animator Controller 引用，`all` 尝试同次加载的所有动画，`skip` 明确只导静态模型。
+- FBX 包含网格、UV、材质、支持的嵌入纹理、骨骼权重、静态 blend shape 和表情动画。普通 Transform 动画支持位置、旋转、缩放及 streamed/dense/constant 曲线，按源采样率烘焙。`auto` 读取 Animator Controller 和旧 Animation 组件引用，`all` 尝试同次加载的所有动画，`skip` 明确只导静态模型。
 - `fbxScaleFactor` 是附加模型父节点缩放，默认 1。没有仿真 Unity 自定义 Shader、约束或运行时脚本。
 - Texture2DArray 每层输出 `名称_1.png`、`名称_2.png` 等文件；读取每层基础 mip，正确跳过其余 mip；`imageFormat: 'none'` 输出各层基础 mip 原始 `.tex`。
 - 旧 MovieTexture 原样输出 `.ogv`，不做视频转码；现代 VideoClip 继续使用既有导出路径。Garupa 清单中下载到的视频包实际使用 TextAsset。
 
-**尚未等价的部分**：Humanoid 肌肉重定向、表情动画、旧压缩旋转/属性动画、加权切线及非 ZXY 旧欧拉曲线、需要 FMOD 的音频。
-遇到这些动画会报 `UNSUPPORTED_OPERATION`，不会成功返回静态 FBX 冒充完整动画。
-没有恢复优化骨架中被剥离的 Transform；缺少骨骼、外部引用或资源时明确失败。
-动画支持已用合成曲线读回验证；清单中的真实动画为 Humanoid/表情曲线，不能当作已通过的普通骨骼动画样本。
+表情支持旧 FloatCurve 与新 streamed/dense/constant 绑定，保留多通道同时变化及渐进帧。
+旧曲线支持加权切线、六种欧拉旋转顺序和压缩四元数；所有曲线共用时间轴，保留延迟起始。
+Renderer.enabled 写为 FBX Visibility 阶跃曲线。优化骨架可根据配套 Avatar 的 TOS 和默认姿势恢复，并以骨骼哈希绑定 Mesh；Avatar 缺失或引用冲突时明确失败。
+
+真实清单中的 `001_cos_live_default` 头部与两段 `cute` 唇形动画已用独立 FBX 导入器读回验证。
+每段 1 秒、31 条表情轨道，其中 4 个嘴型通道实际变化。旧压缩旋转、加权曲线和优化骨架恢复目前使用合成回归。
+
+**仍未实现**：Humanoid 肌肉重定向、除 blend shape / Renderer.enabled 之外的旧属性动画，以及需要 FMOD 的音频。
+不支持的动画会报 `UNSUPPORTED_OPERATION`。动画找不到表情目标时有警告；整组动画完全无法匹配模型时失败，可由调用方显式选择 `fbxAnimation: 'skip'`。
 
 安装包包含本地 WASM，无安装脚本、运行时下载、.NET、原生可执行文件或子进程。
 真实模型回归可设置 `ASSET_STUDIO_TEST_MODEL_INPUT` 为本地缓存目录（其下保留 `star3d/...` 路径），再运行 `pnpm test` 和 `pnpm test:package`。
+
+真实唇形回归另设置 `ASSET_STUDIO_TEST_LIPSYNC_INPUT` 为同一缓存根目录，需要其中包含
+`star3d/character/head/001_cos_live_default` 和 `star3d/motions/lipsync/cute`。
+该变量同时用于 `pnpm test` 和 `pnpm test:package`；Three.js 仅作开发时独立校验器，不进入运行时依赖。

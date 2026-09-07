@@ -3,12 +3,17 @@ import { buildModel, ObjectResolver } from "./model.js";
 import { convertModel } from "./fbx.js";
 import { registerExtraTextureFormats } from "./texture-formats.js";
 registerExtraTextureFormats();
-import { Texture2DArray, MovieTexture } from "./asset-parsers.js";
+import {
+  Texture2DArray,
+  MovieTexture,
+  LegacyAnimation,
+} from "./asset-parsers.js";
 import { textureArrayLayers } from "./texture-array.js";
 import { convertTexture } from "./texture-engine.js";
 import { registerClass } from "unityfs-js";
 registerClass(187, "Texture2DArray", Texture2DArray);
 registerClass(152, "MovieTexture", MovieTexture);
+registerClass(111, "Animation", LegacyAnimation);
 
 import { convertShader } from "./shader.js";
 import type { TextureJob } from "./texture-engine.js";
@@ -642,7 +647,12 @@ export async function execute(
               );
             const obj = o.object;
             if (info.type === "Animator" || mode === "splitObjects") {
-              const model = await buildModel(o, resolver, maxPixels);
+              const model = await buildModel(
+                o,
+                resolver,
+                maxPixels,
+                c.fbxAnimation !== "skip",
+              );
               if (
                 mode === "splitObjects" &&
                 !model.builder.document.meshes.length
@@ -693,8 +703,66 @@ export async function execute(
                 o.className === "Animator"
               )
                 collect(resolver.resolve(o, o.object.controller));
-              for (const clip of clips)
-                addAnimation(model.builder, model.paths, clip.object);
+              let animatedChannels = 0;
+              for (const clip of clips) {
+                const count = addAnimation(
+                  model.builder,
+                  model.paths,
+                  clip.object,
+                );
+                animatedChannels += count;
+                if (!count)
+                  emit({
+                    type: "log",
+                    id,
+                    level: "warning",
+                    message:
+                      "No animation bindings matched " +
+                      clip.object.name +
+                      " in " +
+                      info.name,
+                  });
+              }
+              if (c.fbxAnimation !== "all" && c.fbxAnimation !== "skip")
+                for (const bound of model.builder.legacyAnimations) {
+                  const paths = new Map(
+                    [...model.paths]
+                      .filter(
+                        ([p]) =>
+                          p === bound.rootPath ||
+                          p.startsWith(bound.rootPath + "/") ||
+                          bound.rootPath === "",
+                      )
+                      .map(
+                        ([p, n]) =>
+                          [
+                            bound.rootPath === ""
+                              ? p
+                              : p === bound.rootPath
+                                ? ""
+                                : p.slice(bound.rootPath.length + 1),
+                            n,
+                          ] as [string, number],
+                      ),
+                  );
+                  animatedChannels += addAnimation(
+                    model.builder,
+                    paths,
+                    bound.clip.object,
+                  );
+                }
+              for (const message of model.builder.animationWarnings)
+                emit({ type: "log", id, level: "warning", message });
+              if (
+                (clips.size ||
+                  (c.fbxAnimation !== "skip" &&
+                    model.builder.legacyAnimations.length)) &&
+                !animatedChannels
+              )
+                fail(
+                  "UNSUPPORTED_OPERATION",
+                  "No animation bindings matched this model; provide the matching model or explicitly choose fbxAnimation: skip",
+                );
               if (c.fbxScaleFactor !== undefined) {
                 const nodes = model.builder.document.nodes,
                   root = nodes.length;

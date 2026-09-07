@@ -16,3 +16,11 @@ when exporting FBX. Tests read exported files back to check geometry, weights
 and nonzero animation key times, rather than checking only file creation.
 
 Assimp is BSD-3-Clause; assimpjs glue is MIT. Both licenses ship in dist/licenses.
+
+Since 0.1.4, `src/fbx-morph.ts` fills in morph animation and renderer Visibility
+tracks omitted by the pinned Assimp exporter. `src/fbx-document.ts` rewrites
+binary node offsets and footer padding. Connections follow the pinned Assimp
+FBX importer's `ProcessMorphAnimDatas` and standard FBX property animation.
+Three.js FBXLoader is used only during tests for independent morph/rotation
+readback; it is not bundled in the published runtime. Its FBX reader does not
+animate Visibility, which has a separate structural regression.

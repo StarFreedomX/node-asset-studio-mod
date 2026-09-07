@@ -109,3 +109,52 @@ baseVertex 遗漏；读取流式 Mesh 时错误走浏览器资源路径；FBX �
 
 仍缺少 Humanoid 重定向、表情动画、旧压缩旋转/属性动画、加权切线及非 ZXY 旧欧拉曲线、优化骨架还原及部分 FMOD 音频。
 这次增加了可用的转换能力，尚未达到原引擎全功能等价。
+
+# 0.1.4 动画与骨架补全（2026-09-07）
+
+新增实现：
+
+- Blend shape 的旧 FloatCurve 和现代 streamed/dense/constant 动画绑定，兼容带/不带 `blendShape.` 前缀的 CRC32；多通道共同采样，渐进帧权重插值。
+- 补写 Assimp 遗漏的 FBX 表情 AnimationStack / Layer / Curve 及连接，保留静态权重；重算二进制节点偏移和尾部对齐。
+- Renderer.enabled → FBX Visibility 阶跃曲线。
+- 旧加权 Bezier/Hermite 切线、六种欧拉旋转顺序、PackedQuatVector 解码与旋转导出。
+- 修复 PackedQuatVector 错读额外四字节、Unity 2018 加权关键帧错位、各曲线单独归零造成起始延迟丢失的问题。
+- 旧 Animation 组件自动收集绑定动画；同名片段独立命名。完全不匹配时失败，单个表情目标缺失时警告。
+- 优化骨架根据 Avatar 默认姿势和 TOS 还原，通过骨骼名称哈希绑定；仅存一个骨骼索引的顶点恢复隐含的单位权重。
+
+## 真实表情动画
+
+继续从用户清单下载 `star3d/character/head/001_cos_live_default`（3,431,633 字节），
+和已有的 `star3d/motions/lipsync/cute` 放在同一输入目录，以 `mode: animator, fbxAnimation: all` 导出。
+使用 **Three.js 0.180.0 FBXLoader**，独立于写出用的 Assimp，读取完整 FBX；仅关闭图片加载，避免测试依赖浏览器 DOM/网络。
+
+| 动画 | 时长 | 表情轨道 | 有变化的嘴型轨道 | 每条轨道采样 |
+| --- | ---: | ---: | ---: | ---: |
+| cute_lip_sync_001 | 1 秒 | 31 | 4 | 61 |
+| cute_lip_sync_without_voice_001 | 1 秒 | 31 | 4 | 61 |
+
+四条变化轨道的峰值分别约为 1、0.584173、0.435517、0.708955；其余轨道保留常量，导出无缺失目标警告。
+FBX 还包含可见性轨道；Three.js 的 FBX 动画读取器不处理 Visibility，因此可见性另用节点连接、数值和阶跃标志回归验证，不宣称做过可见性播放验证。
+
+旧压缩旋转、加权曲线、渐进表情帧、优化骨架恢复采用合成回归；未声称真实样本覆盖所有这些格式。
+原真实模型、Shader、纹理数组和损坏输入回归保持。离线 npm 安装包在空 PATH、无效 DOTNET_ROOT 下也导出这两段唇形动画，再由独立读取器验证。
+
+最终验证：54 项单元与真实模型/唇形测试通过；res014089、Shader 集成与离线安装包检查通过。
+未提供本轮可选 ASTC 外部样本，该项集成测试跳过；内置 ASTC 合成回归仍通过。
+原项目 diff 240→250 再次通过：11 个输入，7/7 资源项成功，21 个最终差异文件，零警告、零兜底。
+
+## 剩余范围
+
+Humanoid 样本的 Avatar 中可以读取 Human 骨架、关节轴、限制及映射，但肌肉曲线到关节姿态的完整重定向仍未实现。
+`star3d/motions/characterunique/ch015/001` 仍明确报 `UNSUPPORTED_OPERATION`，没有替换成近似或静态成功结果。
+其他旧属性动画和 FMOD 依赖音频也仍有限制。本轮不宣称全引擎等价。
+
+```sh
+ASSET_STUDIO_TEST_MODEL_INPUT=/path/to/model-cache \
+ASSET_STUDIO_TEST_LIPSYNC_INPUT=/path/to/model-cache pnpm test
+
+ASSET_STUDIO_TEST_INPUT=/Users/bytedance/Downloads/res014089 \
+ASSET_STUDIO_TEST_SHADER_INPUT=/path/to/gacha1937 \
+ASSET_STUDIO_TEST_MODEL_INPUT=/path/to/model-cache \
+ASSET_STUDIO_TEST_LIPSYNC_INPUT=/path/to/model-cache pnpm test:package
+```

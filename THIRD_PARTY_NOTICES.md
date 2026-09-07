@@ -199,3 +199,10 @@ Pinned hashes, Assimp source revision and adaptation notes are in `vendor/assimp
 The vendored MIT texture decoder also includes BC4/5/6H and PVRTC sources from
 the same pinned texture2ddecoder revision listed above. Format layouts and Unity
 object semantics are adapted from AssetStudioMod v0.19.0 (MIT); no C# runtime is used.
+
+
+Animation packed-quaternion layouts and Avatar default-pose restoration follow
+AssetStudioMod v0.19.0 (MIT, license already included above). The local TypeScript
+FBX writer restores morph and Visibility animation connections omitted by the
+pinned Assimp build. Three.js 0.180.0 (MIT) is a development-only independent FBX
+reader for regression tests; its code is not included in the published runtime.

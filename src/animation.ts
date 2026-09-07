@@ -1,3 +1,9 @@
+import {
+  packedIntegers,
+  packedQuaternions,
+  slerp,
+} from "./packed-animation.js";
+import { sampleKeys, curveTimes, eulerQuaternion } from "./animation-curves.js";
 // Avoid node:zlib.crc32, which is absent in early Node 22 releases.
 const crcTable = Uint32Array.from({ length: 256 }, (_, i) => {
   let c = i;
@@ -9,7 +15,13 @@ export function crc32(data: Uint8Array): number {
   for (const v of data) c = crcTable[(c ^ v) & 255] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
-import { vector, type GlbBuilder } from "./model.js";
+import {
+  vector,
+  morphWeights,
+  type GlbBuilder,
+  type MorphBinding,
+  type MorphChannel,
+} from "./model.js";
 import { PPtr } from "../node_modules/unityfs-js/unityfs/classes/pptr.js";
 export interface CurveKey {
   time: number;
@@ -94,20 +106,8 @@ function quaternion(v: number[]) {
   if (!n) throw Error("Zero animation quaternion");
   return [v[0] / n, -v[1] / n, -v[2] / n, v[3] / n];
 }
-function euler(v: number[]) {
-  const [x, y, z] = v.map((n) => (n * Math.PI) / 360),
-    cx = Math.cos(x),
-    sx = Math.sin(x),
-    cy = Math.cos(y),
-    sy = Math.sin(y),
-    cz = Math.cos(z),
-    sz = Math.sin(z);
-  return quaternion([
-    cy * sx * cz + sy * cx * sz,
-    sy * cx * cz - cy * sx * sz,
-    cy * cx * sz - sy * sx * cz,
-    cy * cx * cz + sy * sx * sz,
-  ]);
+function euler(v: number[], order = 4) {
+  return quaternion(eulerQuaternion(v, order));
 }
 export function addAnimation(
   builder: GlbBuilder,
@@ -119,10 +119,31 @@ export function addAnimation(
     (!Number.isFinite(clip.sampleRate) || clip.sampleRate <= 0)
   )
     throw Error("Invalid animation sample rate");
-  if (clip.floatCurves?.length || clip.pptrCurves?.length)
+  if (
+    clip.floatCurves?.some(
+      (c: any) =>
+        c.classID !== 137 && !(c.classID === 25 && c.attribute === "m_Enabled"),
+    ) ||
+    clip.pptrCurves?.length
+  )
     throw Object.assign(Error("Legacy property animation is not supported"), {
       code: "UNSUPPORTED_OPERATION",
     });
+  // All channels share the clip clock; a curve starting late must keep its delay.
+  const clipStart =
+    clip.muscleClip?.startTime ??
+    Math.min(
+      0,
+      ...[
+        "positionCurves",
+        "rotationCurves",
+        "scaleCurves",
+        "eulerCurves",
+        "floatCurves",
+      ].flatMap((key) =>
+        (clip[key] ?? []).map((c: any) => c.curve.curve[0]?.time ?? 0),
+      ),
+    );
   const g = builder.document,
     channels: any[] = [],
     samplers: any[] = [],
@@ -154,6 +175,76 @@ export function addAnimation(
     });
     channels.push({ sampler: samplers.length - 1, target: { node, path } });
   };
+  const visibilityTracks: {
+    node: number;
+    times: number[];
+    values: number[];
+  }[] = [];
+  const visibility = (
+    node: number | undefined,
+    times: number[],
+    values: number[],
+  ) => {
+    for (const mesh of builder.renderers.get(node ?? -1) ?? [])
+      visibilityTracks.push({
+        node: mesh,
+        times,
+        values: values.map((v) => (v > 0 ? 1 : 0)),
+      });
+  };
+  const morphTracks = new Map<
+    number,
+    {
+      morph: MorphBinding;
+      curves: Map<
+        number,
+        { channel: MorphChannel; times: number[]; values: number[] }
+      >;
+    }
+  >();
+  function morph(
+    node: number | undefined,
+    attribute: number | string,
+    times: number[],
+    values: number[],
+  ) {
+    const matches = (channel: MorphChannel) =>
+      typeof attribute === "number"
+        ? crc32(Buffer.from(channel.name)) === attribute ||
+          crc32(Buffer.from("blendShape." + channel.name)) === attribute
+        : "blendShape." + channel.name === attribute;
+    let bindings =
+      node !== undefined && node >= 0 ? builder.morphs.get(node) : undefined;
+    if (!bindings) {
+      const owners = [...builder.morphs.values()].filter((ms) =>
+        ms.some((m) => m.channels.some(matches)),
+      );
+      if (owners.length > 1)
+        throw Error("Ambiguous animation morph target " + attribute);
+      bindings = owners[0];
+    }
+    let matched = false;
+    for (const binding of bindings ?? []) {
+      const matching = binding.channels.filter(matches);
+      if (matching.length > 1)
+        throw Error("Ambiguous animation morph hash " + attribute);
+      const channel = matching[0];
+      if (!channel) continue;
+      matched = true;
+      let track = morphTracks.get(binding.node);
+      if (!track) {
+        track = { morph: binding, curves: new Map() };
+        morphTracks.set(binding.node, track);
+      }
+      if (track.curves.has(channel.start))
+        throw Error("Duplicate blend shape animation channel");
+      track.curves.set(channel.start, { channel, times, values });
+    }
+    if (!matched)
+      builder.animationWarnings.push(
+        "No blend shape matched " + attribute + " in animation " + clip.name,
+      );
+  }
   const convert = (attribute: number, v: number[]) =>
     attribute === 1
       ? [-v[0], v[1], v[2]]
@@ -174,51 +265,15 @@ export function addAnimation(
       if (node === undefined) continue;
       const keys = curve.curve.curve;
       if (!keys.length) continue;
-      if (keys.some((k: any) => k.weightedMode))
-        throw Object.assign(
-          Error("Weighted legacy animation tangents are not supported"),
-          { code: "UNSUPPORTED_OPERATION" },
-        );
-      if (
-        attribute === 4 &&
-        curve.curve.rotationOrder !== undefined &&
-        curve.curve.rotationOrder !== 4
-      )
-        throw Object.assign(Error("Unsupported legacy Euler rotation order"), {
-          code: "UNSUPPORTED_OPERATION",
-        });
-      // Bake cubic Hermite curves at the source clip's sample rate, retaining key times.
-      const rate = clip.sampleRate || 60,
+      const ts = curveTimes(keys, clip.sampleRate || 60),
         start = keys[0].time,
-        end = keys.at(-1).time,
-        times = new Set<number>(keys.map((k: any) => k.time));
-      if ((end - start) * rate > 1e6)
-        throw Error("Animation exceeds sample limit");
-      for (let t = start; t < end; t += 1 / rate) times.add(t);
-      const ts = [...times].sort((a, b) => a - b),
         dim = attribute === 2 ? 4 : 3;
-      let index = 0;
-      const values: number[] = [];
-      for (const t of ts) {
-        while (index + 1 < keys.length && keys[index + 1].time < t) index++;
-        const a = keys[index],
-          b = keys[Math.min(index + 1, keys.length - 1)],
-          dt = b.time - a.time,
-          u = dt ? (t - a.time) / dt : 0;
-        const av = vector(a.value, dim),
-          bv = vector(b.value, dim),
-          as = vector(a.outSlope, dim),
-          bs = vector(b.inSlope, dim);
-        const v = av.map((v, i) =>
-          !Number.isFinite(as[i]) || !Number.isFinite(bs[i])
-            ? v
-            : (2 * u ** 3 - 3 * u * u + 1) * v +
-              (u ** 3 - 2 * u * u + u) * dt * as[i] +
-              (-2 * u ** 3 + 3 * u * u) * bv[i] +
-              (u ** 3 - u * u) * dt * bs[i],
-        );
-        values.push(...convert(attribute, v));
-      }
+      const values = ts.flatMap((t) => {
+        const v = sampleKeys(keys, t, dim);
+        return attribute === 4
+          ? euler(v, curve.curve.rotationOrder ?? 4)
+          : convert(attribute, v);
+      });
       emit(
         node,
         attribute === 1
@@ -226,7 +281,7 @@ export function addAnimation(
           : attribute === 3
             ? "scale"
             : "rotation",
-        ts.map((t) => t - start),
+        ts.map((t) => t - clipStart),
         values,
         attribute === 2 || attribute === 4 ? 4 : 3,
       );
@@ -246,7 +301,10 @@ export function addAnimation(
     if (!Number.isSafeInteger(count) || count < 1 || count > 1e6)
       throw Error("Invalid animation sample count");
     const unsupported = all.filter(
-      (b: any) => b.typeID !== 4 || ![1, 2, 3, 4].includes(b.attribute),
+      (b: any) =>
+        !(b.typeID === 25 && b.attribute === 3305885265) &&
+        b.typeID !== 137 &&
+        (b.typeID !== 4 || ![1, 2, 3, 4].includes(b.attribute)),
     );
     if (unsupported.length)
       throw Object.assign(
@@ -283,10 +341,12 @@ export function addAnimation(
             : 1,
         node = hashes.get(binding.path);
       if (
-        binding.typeID === 4 &&
-        [1, 2, 3, 4].includes(binding.attribute) &&
-        node !== undefined &&
-        node >= 0
+        binding.typeID === 137 ||
+        binding.typeID === 25 ||
+        (binding.typeID === 4 &&
+          [1, 2, 3, 4].includes(binding.attribute) &&
+          node !== undefined &&
+          node >= 0)
       ) {
         const values: number[] = [];
         for (const time of times) {
@@ -318,19 +378,35 @@ export function addAnimation(
               v.push(value);
             }
           }
-          values.push(...convert(binding.attribute, v));
+          values.push(
+            ...(binding.typeID !== 4 ? v : convert(binding.attribute, v)),
+          );
         }
-        emit(
-          node,
-          binding.attribute === 1
-            ? "translation"
-            : binding.attribute === 3
-              ? "scale"
-              : "rotation",
-          times.map((t) => t - start),
-          values,
-          binding.attribute === 2 || binding.attribute === 4 ? 4 : 3,
-        );
+        if (binding.typeID === 25)
+          visibility(
+            node,
+            times.map((t) => t - clipStart),
+            values,
+          );
+        else if (binding.typeID === 137)
+          morph(
+            node,
+            binding.attribute,
+            times.map((t) => t - clipStart),
+            values,
+          );
+        else
+          emit(
+            node!,
+            binding.attribute === 1
+              ? "translation"
+              : binding.attribute === 3
+                ? "scale"
+                : "rotation",
+            times.map((t) => t - clipStart),
+            values,
+            binding.attribute === 2 || binding.attribute === 4 ? 4 : 3,
+          );
       }
       offset += dim;
     }
@@ -338,12 +414,98 @@ export function addAnimation(
     if (offset !== stream.length + dense.curveCount + constant.length)
       throw Error("Animation binding/curve count mismatch");
   }
-  if (clip.compressedRotationCurves?.length)
-    throw Object.assign(
-      Error("Packed legacy rotation curves require decompression"),
-      { code: "UNSUPPORTED_OPERATION" },
+  for (const curve of clip.floatCurves ?? []) {
+    const keys = curve.curve.curve;
+    if (!keys.length) continue;
+    const times = curveTimes(keys, clip.sampleRate || 60),
+      start = keys[0].time;
+    const values = times.map((t) => sampleKeys(keys, t, 1)[0]);
+    if (curve.classID === 25)
+      visibility(
+        paths.get(curve.path),
+        times.map((t) => t - clipStart),
+        values,
+      );
+    else
+      morph(
+        paths.get(curve.path),
+        curve.attribute,
+        times.map((t) => t - clipStart),
+        values,
+      );
+  }
+  for (const [node, { morph, curves }] of morphTracks) {
+    const times = [
+        ...new Set([...curves.values()].flatMap((c) => c.times)),
+      ].sort((a, b) => a - b),
+      values: number[] = [];
+    for (const t of times) {
+      const weights = [...morph.defaults];
+      for (const curve of curves.values()) {
+        let i = 0;
+        while (i + 1 < curve.times.length && curve.times[i + 1] <= t) i++;
+        const j = Math.min(i + 1, curve.times.length - 1),
+          u =
+            i === j
+              ? 0
+              : Math.max(
+                  0,
+                  (t - curve.times[i]) / (curve.times[j] - curve.times[i]),
+                );
+        const v = curve.values[i] * (1 - u) + curve.values[j] * u;
+        weights.splice(
+          curve.channel.start,
+          curve.channel.weights.length,
+          ...morphWeights(curve.channel, v),
+        );
+      }
+      values.push(...weights);
+    }
+    emit(node, "weights", times, values, 1);
+  }
+  for (const curve of clip.compressedRotationCurves ?? []) {
+    const node = paths.get(curve.path);
+    if (node === undefined) continue;
+    const deltas = packedIntegers(curve.times),
+      quats = packedQuaternions(curve.values);
+    if (deltas.length !== quats.length)
+      throw Error("Packed animation time/value count mismatch");
+    let tick = 0;
+    const keys = deltas.map((dt, i) => ({
+      time: (tick += dt) * 0.01,
+      value: quats[i],
+    }));
+    if (!keys.length) continue;
+    const times = curveTimes(keys, clip.sampleRate || 60),
+      values: number[] = [];
+    let at = 0;
+    for (const t of times) {
+      while (at + 1 < keys.length && keys[at + 1].time <= t) at++;
+      const a = keys[at],
+        b = keys[Math.min(at + 1, keys.length - 1)],
+        u = a === b ? 0 : (t - a.time) / (b.time - a.time);
+      values.push(...quaternion(slerp(a.value, b.value, u)));
+    }
+    emit(
+      node,
+      "rotation",
+      times.map((t) => t - clipStart),
+      values,
+      4,
     );
-  if (channels.length)
-    g.animations.push({ name: clip.name, samplers, channels });
-  return channels.length;
+  }
+  let animationName = clip.name ?? "Animation",
+    suffix = 2;
+  while (g.animations.some((a: any) => a.name === animationName))
+    animationName = (clip.name ?? "Animation") + "_" + suffix++;
+  if (channels.length || visibilityTracks.length)
+    g.animations.push({
+      name: animationName,
+      samplers,
+      channels,
+      ...(visibilityTracks.length
+        ? { extras: { unityVisibility: visibilityTracks } }
+        : {}),
+    });
+  return channels.length + visibilityTracks.length;
 }

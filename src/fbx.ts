@@ -1,3 +1,4 @@
+import { completeMorphExport } from "./fbx-morph.js";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -8,6 +9,21 @@ export async function convertModel(
   name: string,
   format: "fbx" | "fbxa" | "assjson" = "fbx",
 ): Promise<{ path: string; data: Uint8Array }[]> {
+  if (format === "fbxa" && /\.glb$/i.test(name)) {
+    const b = Buffer.from(data.buffer, data.byteOffset, data.byteLength),
+      g = JSON.parse(b.toString("utf8", 20, 20 + b.readUInt32LE(12)));
+    if (
+      g.animations?.some(
+        (a: any) =>
+          a.channels?.some((c: any) => c.target.path === "weights") ||
+          a.extras?.unityVisibility?.length,
+      )
+    )
+      throw Object.assign(
+        Error("Morph/visibility animation requires binary FBX output"),
+        { code: "UNSUPPORTED_OPERATION" },
+      );
+  }
   const a = await (module ??= createRequire(import.meta.url)(
     "./vendor/assimp.cjs",
   )({
@@ -31,8 +47,13 @@ export async function convertModel(
                 (format === "assjson" ? ".json" : ".fbx")
               : f.GetPath(),
           data:
-            /\.glb$/i.test(name) && format !== "assjson"
-              ? fixGltfKeyTimes(Uint8Array.from(f.GetContent()), format)
+            i === 0 && /\.glb$/i.test(name) && ["fbx", "fbxa"].includes(format)
+              ? format === "fbx"
+                ? completeMorphExport(
+                    fixGltfKeyTimes(Uint8Array.from(f.GetContent()), format),
+                    data,
+                  )
+                : fixGltfKeyTimes(Uint8Array.from(f.GetContent()), format)
               : Uint8Array.from(f.GetContent()),
         });
       } finally {

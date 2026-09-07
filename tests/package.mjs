@@ -69,6 +69,17 @@ test("published package installs offline without lifecycle downloads and runs wi
       ],
       { cwd: consumer, encoding: "utf8" },
     );
+    if (process.env.ASSET_STUDIO_TEST_LIPSYNC_INPUT) {
+      await mkdir(path.join(consumer, "lipsync"));
+      for (const [src, dest] of [
+        ["star3d/character/head/001_cos_live_default", "head"],
+        ["star3d/motions/lipsync/cute", "motion"],
+      ])
+        await copyFile(
+          path.join(process.env.ASSET_STUDIO_TEST_LIPSYNC_INPUT, src),
+          path.join(consumer, "lipsync", dest),
+        );
+    }
     const installed = path.join(consumer, "node_modules", pack.name);
     const manifest = JSON.parse(
       await readFile(path.join(installed, "package.json")),
@@ -110,7 +121,7 @@ test("published package installs offline without lifecycle downloads and runs wi
     await writeFile(
       path.join(consumer, "check.mjs"),
       `
-      import { readFile } from 'node:fs/promises';
+      import { readFile, writeFile } from 'node:fs/promises';
       import assert from 'node:assert/strict';
       import { readAssets } from ${JSON.stringify(pack.name)};
       import { createHash } from 'node:crypto';
@@ -133,6 +144,7 @@ test("published package installs offline without lifecycle downloads and runs wi
       }
       const array=await readAssets(serialized([{type:187,data:textureArray({data:Buffer.alloc(32,255)})}]),{log:false});assert.equal(array.files.length,2);assert.deepEqual(array.files.map(f=>f.path),['array_1.png','array_2.png']);
       if(process.env.MODEL_FIXTURE){const model=await readAssets(process.env.MODEL_FIXTURE,{unityVersion:'2022.3.62f1',mode:'animator',log:false});assert.equal(model.exportedCount,1);assert.ok(model.files[0].path.endsWith('.fbx'));assert.equal(Buffer.from(model.files[0].data).subarray(0,20).toString(),'Kaydara FBX Binary  ');}
+      if(process.env.LIPSYNC_FIXTURE){const result=await readAssets(process.env.LIPSYNC_FIXTURE,{unityVersion:'2022.3.62f1',mode:'animator',fbxAnimation:'all',log:false});assert.equal(result.exportedCount,1);await writeFile('lipsync.fbx',result.files[0].data);}
       console.log(JSON.stringify({ assets: result.assetCount, pngs: result.files.length }));
     `,
     );
@@ -145,6 +157,9 @@ test("published package installs offline without lifecycle downloads and runs wi
           PATH: emptyPath,
           DOTNET_ROOT: path.join(temporary, "no-dotnet"),
           FIXTURE: path.resolve(input),
+          ...(process.env.ASSET_STUDIO_TEST_LIPSYNC_INPUT
+            ? { LIPSYNC_FIXTURE: path.join(consumer, "lipsync") }
+            : {}),
           ...(process.env.ASSET_STUDIO_TEST_MODEL_INPUT
             ? {
                 MODEL_FIXTURE: path.resolve(
@@ -173,6 +188,16 @@ test("published package installs offline without lifecycle downloads and runs wi
       }),
     );
     assert.deepEqual(result, { assets: 4, pngs: 4 });
+    if (process.env.ASSET_STUDIO_TEST_LIPSYNC_INPUT) {
+      const { readFbx } = await import("./helpers/fbx.mjs");
+      const scene = readFbx(await readFile(path.join(consumer, "lipsync.fbx")));
+      assert.equal(scene.animations.length, 2);
+      assert.ok(
+        scene.animations.every(
+          (a) => a.tracks.length === 31 && a.duration === 1,
+        ),
+      );
+    }
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

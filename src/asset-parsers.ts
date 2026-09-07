@@ -1,3 +1,4 @@
+import { Behaviour } from "../node_modules/unityfs-js/unityfs/classes/behaviour.js";
 // Layouts follow AssetStudioMod v0.19.0 (MIT); see vendor/assetstudio/LICENSE.
 import { Texture } from "../node_modules/unityfs-js/unityfs/classes/texture.js";
 import { PPtr } from "../node_modules/unityfs-js/unityfs/classes/pptr.js";
@@ -79,5 +80,28 @@ export class MovieTexture extends Texture {
     reader.align(4);
     this.audioClip = new PPtr(reader);
     this.movieData = take(reader, reader.readInt32());
+  }
+}
+
+export class LegacyAnimation extends Behaviour {
+  static exposedAttributes = [
+    "gameObject",
+    "enabled",
+    "animation",
+    "animations",
+  ];
+  animation: any;
+  animations: any[];
+  constructor(reader: any) {
+    super(reader);
+    this.animation = new PPtr(reader);
+    const count = reader.readInt32();
+    if (
+      count < 0 ||
+      count > 100000 ||
+      reader.length - reader.offset < count * (reader.versionGTE(5, 0) ? 12 : 8)
+    )
+      throw Error("Invalid legacy Animation clip count");
+    this.animations = Array.from({ length: count }, () => new PPtr(reader));
   }
 }

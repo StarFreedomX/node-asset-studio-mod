@@ -137,6 +137,40 @@ await build({
             };
           },
         );
+        b.onLoad(
+          { filter: /unityfs[\\/]classes[\\/]animationClip\.js$/ },
+          async (args) => {
+            let contents = (await readFile(args.path, "utf8")).replaceAll(
+              "\r\n",
+              "\n",
+            );
+            const start = contents.indexOf(
+                "export class PackedQuaternionVector {",
+              ),
+              end = contents.indexOf(
+                "export class CompressedAnimationCurve {",
+                start,
+              );
+            if (start < 0 || end < 0)
+              throw Error("Packed animation adapter needs review");
+            contents = contents.slice(0, start) + contents.slice(end);
+            const weighted = "if (reader.version[0] > 2018)";
+            if (!contents.includes(weighted))
+              throw Error("Weighted animation adapter needs review");
+            contents = contents.replace(
+              weighted,
+              "if (reader.version[0] >= 2018)",
+            );
+            return {
+              contents:
+                "import {PackedQuaternionVector} from " +
+                JSON.stringify(path.join(root, "src/packed-animation.ts")) +
+                ";\n" +
+                contents,
+              loader: "js",
+            };
+          },
+        );
         // Our outer Node Worker provides concurrency; the upstream browser pool is unused.
         b.onResolve({ filter: /\?worker&inline$/ }, () => ({
           path: "browser-worker-disabled",

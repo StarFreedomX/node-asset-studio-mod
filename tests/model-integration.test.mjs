@@ -87,3 +87,59 @@ test(
     assert.equal(scale.transformation[10], 2);
   },
 );
+
+test(
+  "real Kasumi head + both cute lipsync clips export matching named FBX morph tracks",
+  { skip: !process.env.ASSET_STUDIO_TEST_LIPSYNC_INPUT },
+  async () => {
+    const fs = await import("node:fs/promises"),
+      os = await import("node:os"),
+      { readFbx } = await import("./helpers/fbx.mjs");
+    const root = process.env.ASSET_STUDIO_TEST_LIPSYNC_INPUT,
+      temp = await fs.mkdtemp(path.join(os.tmpdir(), "asset-lipsync-"));
+    try {
+      await fs.copyFile(
+        path.join(root, "star3d/character/head/001_cos_live_default"),
+        path.join(temp, "head"),
+      );
+      await fs.copyFile(
+        path.join(root, "star3d/motions/lipsync/cute"),
+        path.join(temp, "motion"),
+      );
+      const warnings = [];
+      const result = await readAssets(temp, {
+        unityVersion: "2022.3.62f1",
+        mode: "animator",
+        fbxAnimation: "all",
+        log: false,
+        onEvent: (e) => {
+          if (e.type === "log" && e.level === "warning")
+            warnings.push(e.message);
+        },
+      });
+      assert.deepEqual(warnings, []);
+      assert.equal(result.exportedCount, 1);
+      const tree = readFbx(result.files[0].data);
+      assert.deepEqual(
+        tree.animations.map((a) => a.name),
+        ["cute_lip_sync_001", "cute_lip_sync_without_voice_001"],
+      );
+      for (const clip of tree.animations) {
+        assert.equal(clip.duration, 1);
+        assert.equal(clip.tracks.length, 31);
+        const active = clip.tracks.filter((t) => t.values.some((v) => v !== 0));
+        assert.equal(active.length, 4);
+        assert.ok(active.every((t) => t.times.length === 61));
+        const expected = [
+          1, 0.5841727256774902, 0.43551746010780334, 0.7089554071426392,
+        ];
+        for (let i = 0; i < active.length; i++)
+          assert.ok(
+            Math.abs(Math.max(...active[i].values) - expected[i]) < 1e-6,
+          );
+      }
+    } finally {
+      await fs.rm(temp, { recursive: true, force: true });
+    }
+  },
+);

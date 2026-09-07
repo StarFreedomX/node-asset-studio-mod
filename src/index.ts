@@ -27,9 +27,7 @@ export const engineCapabilities = Object.freeze({
   imageFormats: ["png", "none"] as const,
   unsupported: [
     "Humanoid muscle animation retargeting",
-    "Blend shape animation",
-    "Packed legacy rotation animation",
-    "Weighted legacy tangents and non-ZXY legacy Euler curves",
+    "Legacy property animation other than blend shapes and Renderer.enabled",
     "FMOD-dependent audio conversion",
   ] as const,
 });

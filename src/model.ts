@@ -1,3 +1,4 @@
+import { restoreAvatarSkeleton } from "./avatar-skeleton.js";
 import { meshTriangles } from "./mesh-layout.js";
 import path from "node:path";
 import { convertTexture } from "./texture-engine.js";
@@ -77,6 +78,9 @@ export function morphWeights(channel: MorphChannel, value: number): number[] {
 }
 export class GlbBuilder {
   morphs = new Map<number, MorphBinding[]>();
+  renderers = new Map<number, number[]>();
+  animationWarnings: string[] = [];
+  legacyAnimations: { clip: any; rootPath: string }[] = [];
   document: any = {
     asset: { version: "2.0", generator: "node-asset-studio-mod-js" },
     scene: 0,
@@ -213,6 +217,7 @@ export async function buildModel(
   root: any,
   resolver: ObjectResolver,
   maxPixels: number,
+  includeLegacyAnimations = true,
 ): Promise<{
   builder: GlbBuilder;
   transforms: Map<any, number>;
@@ -257,6 +262,20 @@ export async function buildModel(
     for (const component of resolver.components(gameObject))
       if (["SkinnedMeshRenderer", "MeshRenderer"].includes(component.className))
         renderers.push({ info: component, node: index });
+    for (const component of resolver.components(gameObject))
+      if (includeLegacyAnimations && component.className === "Animation") {
+        const seen = new Set<any>();
+        for (const pointer of [
+          component.object.animation,
+          ...(component.object.animations ?? []),
+        ]) {
+          const clip = resolver.resolve(component, pointer);
+          if (clip && !seen.has(clip)) {
+            seen.add(clip);
+            builder.legacyAnimations.push({ clip, rootPath: current });
+          }
+        }
+      }
     const children = obj.children.map((p: any) =>
       visit(resolver.resolve(t, p), current),
     );
@@ -267,6 +286,15 @@ export async function buildModel(
   const modelRoot = visit(rootTransform, "", true);
   g.scenes[0].nodes.push(g.nodes.length);
   g.nodes.push({ name: "Scene", children: [modelRoot] });
+  let avatarBones = new Map<number, number>();
+  if (
+    root.className === "Animator" &&
+    root.object.hasTransformHierarchy === false
+  ) {
+    const avatar = resolver.resolve(root, root.object.avatar);
+    if (!avatar) throw Error("Optimized Animator requires its Avatar");
+    avatarBones = restoreAvatarSkeleton(builder, paths, avatar.object);
+  }
   // Assimp resolves animation channels and bones by name. Keep node names unique.
   const usedNames = new Set<string>();
   function uniqueName(name: string) {
@@ -413,17 +441,29 @@ export async function buildModel(
         "VEC4",
       );
     let skin: number | undefined;
-    if (renderer.bones?.length) {
+    if (
+      renderer.bones?.length ||
+      (info.className === "SkinnedMeshRenderer" && mesh.bindPose?.length)
+    ) {
       if (
-        mesh.bindPose?.length !== renderer.bones.length ||
+        (renderer.bones?.length &&
+          mesh.bindPose?.length !== renderer.bones.length) ||
         mesh.skin?.length !== count
       )
         throw Error("Mesh bone/weight count mismatch");
-      const joints = renderer.bones.map((p: any) => {
-        const t = resolver.resolve(info, p),
-          i = transforms.get(t);
-        if (i === undefined) throw Error("Bone is outside exported hierarchy");
-        return i;
+      const joints = mesh.bindPose.map((_: any, bi: number) => {
+        const pointer = renderer.bones?.[bi];
+        if (pointer && BigInt(pointer.pathID ?? 0) !== 0n) {
+          const t = resolver.resolve(info, pointer),
+            node = transforms.get(t);
+          if (node === undefined)
+            throw Error("Bone is outside exported hierarchy");
+          return node;
+        }
+        const node = avatarBones.get(mesh.boneNameHashes?.[bi]);
+        if (node === undefined)
+          throw Error("Missing Avatar bone mapping for bind pose " + bi);
+        return node;
       });
       const weights: number[] = [],
         ids: number[] = [];
@@ -433,6 +473,15 @@ export async function buildModel(
           if (!Number.isFinite(v.weight[j]) || v.weight[j] < 0)
             throw Error("Invalid bone weight");
           sum += v.weight[j];
+        }
+        // Unity's one-influence layout stores only the bone index; its weight is implicit.
+        if (
+          !sum &&
+          mesh.vertexData?.channels?.[12]?.dimension === 0 &&
+          mesh.vertexData?.channels?.[13]?.dimension === 1
+        ) {
+          v.weight[0] = 1;
+          sum = 1;
         }
         if (!sum) throw Error("Vertex has no bone weights");
         for (let j = 0; j < 4; j++) {
@@ -546,9 +595,14 @@ export async function buildModel(
     g.nodes.push({
       name: uniqueName(mesh.name),
       mesh: meshIndex,
+      extras: { unityVisibility: renderer.enabled === false ? 0 : 1 },
       ...(skin !== undefined ? { skin } : {}),
     });
     (g.nodes[node].children ??= []).push(meshNode);
+    builder.renderers.set(node, [
+      ...(builder.renderers.get(node) ?? []),
+      meshNode,
+    ]);
     if (targets.length) {
       const bindings = builder.morphs.get(node) ?? [];
       bindings.push({

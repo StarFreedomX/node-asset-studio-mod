@@ -123,7 +123,7 @@ npm run build
 npm test
 npm pack
 # Run after inspecting the generated tarball:
-npm publish ./node-asset-studio-mod-js-0.1.3.tgz --access public
+npm publish ./node-asset-studio-mod-js-0.1.4.tgz --access public
 ```
 
 `npm pack` rebuilds through `prepack`. Use an unused package version for each release. Maintain the three implementations as worktrees of one Git repository; see [worktree maintenance](WORKTREES.md). Dependencies and runtime files belong to each working directory.
@@ -160,13 +160,13 @@ To exercise the real Shader integration and offline package checks, also set
 `test:integration` and `test:package`. Real game resources are not committed.
 
 
-## Model and additional texture support (0.1.3)
+## Model and additional texture support (0.1.4)
 
 `readAssets(input, { mode: 'animator', fbxAnimation: 'auto' })` returns named
 FBX bytes in `files`. Input may be a directory, file or Buffer. `splitObjects`
 exports one FBX for each root GameObject with meshes. Default `all` also includes
 Animator. Exports include hierarchy, geometry, UVs, common material textures,
-skin weights and static blend shapes. Transform animations support streamed,
+skin weights, static blend shapes and morph animation. Transform animations support streamed,
 dense, constant and ordinary position/rotation/scale curves, baked at source
 sample rate. `fbxAnimation: 'all'` tries every loaded clip; `skip` explicitly
 exports static models. `fbxScaleFactor` adds a scale parent (default 1).
@@ -176,14 +176,28 @@ Texture2DArray exports the base mip of each layer as `name_1.png`, etc., or raw
 bytes. Added codecs include BC4/5/6H, PVRTC, half/float and packed integer formats.
 All codecs and Assimp WASM ship locally, without native executables or .NET.
 
-Remaining limitations are explicit: Humanoid retargeting, blend-shape animation,
-packed legacy rotations/property animation, weighted legacy tangents and non-ZXY Euler curves and FMOD-dependent audio are not
-implemented. Unsupported animations fail rather than silently exporting static
-FBX. Stripped optimized skeletons are not reconstructed; missing bones or
-external references fail. Custom shader/constraint/script behavior is not baked.
-Real CDN models passed FBX readback; animation readback uses synthetic Transform
-fixtures because the downloaded real clips contain Humanoid/morph bindings.
+Morph animation supports legacy FloatCurve and optimized bindings, simultaneous
+channels and progressive targets. Legacy curves support weighted tangents, all
+six Euler orders and packed quaternion rotations; delayed channels keep the clip
+clock. `auto` also collects bound legacy Animation components. Renderer.enabled
+becomes stepped FBX Visibility curves. Stripped skeletons can be reconstructed
+from the matching Avatar's TOS/default pose and mesh bone hashes.
+
+Remaining limitations: Humanoid muscle retargeting, other legacy property
+animations and FMOD-dependent audio. Unsupported animations fail. Unmatched
+morph targets warn, and a wholly unmatched set of clips fails instead of
+silently exporting a static result; `skip` remains an explicit caller choice.
+Custom shader/constraint/script behavior is not baked.
+
+The real Kasumi head and two cute lipsync clips pass independent FBX readback:
+each clip lasts one second with 31 morph tracks and four changing mouth channels.
+Packed legacy rotation, weighted curves and skeleton reconstruction have synthetic
+regressions. Three.js is a test-only independent reader, not a runtime dependency.
 
 Set `ASSET_STUDIO_TEST_MODEL_INPUT` to the fixture directory containing
 `star3d/...` to run real model checks with `npm test` and `npm run test:package`.
 See [COMPATIBILITY.md](COMPATIBILITY.md) for exact samples and results.
+
+For real lipsync tests also set `ASSET_STUDIO_TEST_LIPSYNC_INPUT` to the cache root
+containing `star3d/character/head/001_cos_live_default` and
+`star3d/motions/lipsync/cute`; both `npm test` and `test:package` use it.
