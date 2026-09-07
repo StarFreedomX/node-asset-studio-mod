@@ -1,6 +1,6 @@
 {
-  "name": "node-asset-studio-mod",
-  "version": "1.0.3",
+  "name": "node-asset-studio-mod-bridge",
+  "version": "0.1.0",
   "description": "Controlled Node.js pipe API for linked AssetStudioMod libraries",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +17,7 @@
     "test": "npm run build:ts && node --test tests/*.test.mjs",
     "test:integration": "npm run build:ts && node --test tests/integration.mjs",
     "test:bridge": "node scripts/test-bridge.js",
-    "pub": "pnpm publish"
+    "pub": "npm publish"
   },
   "files": [
     "dist",
