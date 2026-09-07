@@ -13,3 +13,6 @@
 /bridge/bin/
 /bridge/obj/
 /pnpm-workspace.yaml
+
+/scripts/benchmark/
+/reports/benchmark-*
