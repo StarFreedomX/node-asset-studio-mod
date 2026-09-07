@@ -201,6 +201,24 @@ await build({
             loader: "js",
           };
         });
+        b.onLoad({ filter: /fsb5[\\/]vorbis\.js$/ }, async (args) => {
+          let contents = await readFile(args.path, "utf8");
+          // Packet subarrays have nonzero byte offsets inside an FSB payload.
+          // Passing .buffer here reads the bank's header instead of the packet.
+          contents = contents.replaceAll(
+            "new BitReader(packet.buffer)",
+            "new BitReader(packet)",
+          );
+          const old =
+            "oggStream.writePacket(packetData, granulepos, false, isEOS, false)";
+          if (!contents.includes(old))
+            throw Error("FSB Vorbis granule adapter needs review");
+          contents = contents.replace(
+            old,
+            "oggStream.writePacket(packetData, isEOS ? Math.min(granulepos, sample.samples) : granulepos, false, isEOS, false)",
+          );
+          return { contents, loader: "js" };
+        });
         b.onLoad(
           { filter: /unityfs[\\/]assetFile[\\/]model\.js$/ },
           async (args) => {
@@ -269,5 +287,15 @@ await copyFile(
 for (const file of ["LICENSE-assimp", "LICENSE-assimpjs"])
   await copyFile(
     path.join(root, "vendor/assimp", file),
+    path.join(root, "dist/licenses", file),
+  );
+for (const file of [
+  "LICENSE-dr_mp3",
+  "LICENSE-libvorbis",
+  "LICENSE-libogg",
+  "LICENSE-vgmstream",
+])
+  await copyFile(
+    path.join(root, "vendor/audio", file),
     path.join(root, "dist/licenses", file),
   );

@@ -158,3 +158,35 @@ ASSET_STUDIO_TEST_SHADER_INPUT=/path/to/gacha1937 \
 ASSET_STUDIO_TEST_MODEL_INPUT=/path/to/model-cache \
 ASSET_STUDIO_TEST_LIPSYNC_INPUT=/path/to/model-cache pnpm test:package
 ```
+
+## 0.1.5 — 音频转换与原调用语义（2026-09-08）
+
+本轮补齐常见 AudioClip 转换，运行时仍完全使用 JS/WASM：
+
+- 恢复原 CLI 的音频选项语义：默认 `wav`；`none` 返回原始载荷，FSB 不再被隐式解码。
+- FSB5 转换按 `subsoundIndex` 选择音频；修复 6/8 声道位域、32 字节数据偏移、4/96 kHz 采样率、扩展元数据及带填充的名称表。
+- PCM8/16/24/32/float 输出正确 WAV 格式与精确采样数，支持 PCM16 大端标志；去除 FSB 容器填充。多声道/高位深使用 WAVEFORMATEXTENSIBLE。
+- IMA ADPCM 支持 mono/stereo/多声道的不同布局；FADPCM 支持预测器、位移、饱和及尾块裁切。
+- MP3 与 Ogg Vorbis 使用本地预编译 dr_mp3/libvorbis/libogg WASM 转 PCM16 WAV，按块读取并检查预算，完成或失败都释放解码状态。
+- FSB MPEG 按帧长度去除容器填充，避免误删音频末尾的零位。FSB Vorbis 修复读取子数组时丢失字节偏移的问题，并保留最终有效采样数。
+- AudioClip 支持内嵌载荷、Unity 4.x `.resS`、现代外置资源；检查资源范围、损坏/截断、无效子音频索引以及输出预算。
+
+验证环境为 macOS arm64 / Node 24.19.0：
+
+| 验证 | 结果 |
+| --- | --- |
+| `tests/*.test.mjs`（含真实模型与唇形资源） | 72/72 通过，其中本轮音频 18 项 |
+| 集成及 npm 安装包测试 | 10 项通过，1 项可选真实 ASTC 样本测试未配置而跳过 |
+| 纯安装依赖 / 空 PATH | MP3、Vorbis、PNG、Shader、FBX 均运行通过；包内无 .NET、原生可执行文件和安装下载脚本 |
+| 业务项目 10.1.0.240→10.1.0.250 | 11 个输入，7/7 项成功，21 个输出文件，无降级 |
+| Garupa 清单的 `april2020sound` / `sound/bgm098` | 分别输出 1 / 2 个 TextAsset；两个 ACB 均保留 `@UTF` 文件头和名称 |
+
+音频测试使用合成信号和独立原生解码的黄金数据：MP3 对照 FFmpeg，Vorbis 对照
+Xiph libvorbis 1.3.7，误差不超过 2 个 PCM16 单位；IMA/FADPCM 与原生参考逐字节一致。
+FSB Vorbis 用官方编码器生成的音频包，配合确切匹配的内嵌码本重建并读回。
+来源与哈希见 `tests/fixtures/audio/README.md`、`vendor/audio/provenance.json`。
+下载的 Garupa 音频包实际上是 CRI ACB TextAsset，不能作为 AudioClip 编码覆盖率证据。
+
+仍未实现完整 Humanoid 肌肉重定向、其余旧属性动画、GCADPCM、VAG/HEVAG、XMA、
+AAC、ATRAC9、CELT、Opus 等额外音频转换、FSB3/4 转换、多流 MPEG，以及未知码本的 FSB Vorbis。
+ACB 仍由调用方接解析器，不会被当成 AudioClip 转码。此版本不宣称与原引擎完全等价。

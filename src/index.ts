@@ -28,7 +28,7 @@ export const engineCapabilities = Object.freeze({
   unsupported: [
     "Humanoid muscle animation retargeting",
     "Legacy property animation other than blend shapes and Renderer.enabled",
-    "FMOD-dependent audio conversion",
+    "Additional platform audio codecs (GCADPCM, VAG/HEVAG, XMA, AAC, ATRAC9, CELT, Opus)",
   ] as const,
 });
 

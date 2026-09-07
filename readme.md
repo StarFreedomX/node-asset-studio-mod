@@ -71,7 +71,7 @@ This replacement does not provide full AssetStudio feature parity.
 | `dump`             | JSON from embedded TypeTree; fails explicitly if unavailable                                                            |
 | `live2d`           | Engine CubismModel exporter; not validated with a project fixture                                                       |
 | Images             | `png`, or Texture2D raw texture bytes as `.tex` with `none`                                                             |
-| Audio              | JS PCM/Vorbis/MPEG paths; FMOD fallback unavailable. `wav` does not transcode OGG/MP3                                   |
+| Audio              | FSB5 PCM/float, IMA ADPCM and FADPCM; MP3/Vorbis to WAV. Default `wav`; `none` preserves original bytes                                   |
 
 Validated with `res014089`, Unity `2022.3.62f1`: four Texture2D assets produce PNGs whose decoded RGBA pixels exactly match the former .NET exports. Bundle extraction, companion resource round-trip, raw bytes and TypeTree dumps are also tested. The garupa-unpacker migration regression additionally covers Shader, MonoBehaviour and TextAsset; see below.
 
@@ -184,7 +184,7 @@ becomes stepped FBX Visibility curves. Stripped skeletons can be reconstructed
 from the matching Avatar's TOS/default pose and mesh bone hashes.
 
 Remaining limitations: Humanoid muscle retargeting, other legacy property
-animations and FMOD-dependent audio. Unsupported animations fail. Unmatched
+animations and additional platform audio codecs (GCADPCM, VAG/HEVAG, XMA, AAC, ATRAC9, CELT, Opus). Unsupported animations fail. Unmatched
 morph targets warn, and a wholly unmatched set of clips fails instead of
 silently exporting a static result; `skip` remains an explicit caller choice.
 Custom shader/constraint/script behavior is not baked.
@@ -201,3 +201,19 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for exact samples and results.
 For real lipsync tests also set `ASSET_STUDIO_TEST_LIPSYNC_INPUT` to the cache root
 containing `star3d/character/head/001_cos_live_default` and
 `star3d/motions/lipsync/cute`; both `npm test` and `test:package` use it.
+
+
+### AudioClip (0.1.5)
+
+`readAssets(bytes, { assetType: 'audio', audioFormat: 'wav' })` returns named WAV
+buffers. The default now matches the original CLI: convert to WAV. Explicit
+`audioFormat: 'none'` preserves the original payload, including a whole FSB bank.
+Conversion selects `AudioClip.subsoundIndex` and supports FSB5 PCM8/16/24/32/float,
+IMA ADPCM (including multichannel), FADPCM, and MP3/Ogg Vorbis to PCM16 WAV.
+
+Inline audio, Unity 4.x `.resS`, modern companion resources, exact sample counts,
+resource bounds, and output budgets are handled. FSB Vorbis still requires a
+matching bundled setup codebook. FSB3/4 conversion and multistream MPEG remain
+unsupported. Decoding uses embedded WASM from pinned sources, with no runtime
+commands or downloads; ordinary build/install needs no C compiler.
+ACB TextAssets continue returning their original `{ path, data }` for a separate parser.

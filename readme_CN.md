@@ -76,7 +76,7 @@ try {
 | `dump`             | 依赖文件自带 TypeTree，返回 JSON；无 TypeTree 时明确失败                                                       |
 | `live2d`           | 调用引擎的 CubismModel 导出器；尚无本项目实测样本                                                              |
 | 图片格式           | `png`，或 `none` 导出 Texture2D 原始纹理字节为 `.tex`                                                          |
-| 音频               | 引擎的 JS PCM/Vorbis/MPEG 路径；需要 FMOD 的格式不支持，`wav` 不会强制把 OGG/MP3 转成 WAV                      |
+| 音频               | FSB5 PCM/float、IMA ADPCM、FADPCM；MP3/Vorbis 转 WAV。默认 `wav`，`none` 原样保留音频载荷                      |
 
 用户提供的 `res014089`（Unity `2022.3.62f1`）已实测：4 个 Texture2D，4 张 PNG 与此前 .NET 导出结果的解码 RGBA 像素完全一致；还验证了 Bundle 解包、外部资源回读、TypeTree 和原始字节导出。另已实测 garupa-unpacker 的 10.1.0.240 → 10.1.0.250 全类型迁移：11 个新旧包、7 个资源项全部通过，最终写出 21 个差异文件。Shader、MonoBehaviour、Texture2D 和 TextAsset 均走正常转换，无 `.bin` 兜底。详见 [迁移回归记录](COMPATIBILITY.md)。
 
@@ -184,7 +184,7 @@ Renderer.enabled 写为 FBX Visibility 阶跃曲线。优化骨架可根据配�
 真实清单中的 `001_cos_live_default` 头部与两段 `cute` 唇形动画已用独立 FBX 导入器读回验证。
 每段 1 秒、31 条表情轨道，其中 4 个嘴型通道实际变化。旧压缩旋转、加权曲线和优化骨架恢复目前使用合成回归。
 
-**仍未实现**：Humanoid 肌肉重定向、除 blend shape / Renderer.enabled 之外的旧属性动画，以及需要 FMOD 的音频。
+**仍未实现**：Humanoid 肌肉重定向、除 blend shape / Renderer.enabled 之外的旧属性动画，以及 GCADPCM、VAG/HEVAG、XMA、AAC、ATRAC9、CELT、Opus 等音频转换。
 不支持的动画会报 `UNSUPPORTED_OPERATION`。动画找不到表情目标时有警告；整组动画完全无法匹配模型时失败，可由调用方显式选择 `fbxAnimation: 'skip'`。
 
 安装包包含本地 WASM，无安装脚本、运行时下载、.NET、原生可执行文件或子进程。
@@ -193,3 +193,26 @@ Renderer.enabled 写为 FBX Visibility 阶跃曲线。优化骨架可根据配�
 真实唇形回归另设置 `ASSET_STUDIO_TEST_LIPSYNC_INPUT` 为同一缓存根目录，需要其中包含
 `star3d/character/head/001_cos_live_default` 和 `star3d/motions/lipsync/cute`。
 该变量同时用于 `pnpm test` 和 `pnpm test:package`；Three.js 仅作开发时独立校验器，不进入运行时依赖。
+
+
+### AudioClip（0.1.5）
+
+```ts
+const result = await readAssets(bundleBytes, {
+  assetType: 'audio',
+  audioFormat: 'wav', // 默认值；none 返回原始 FSB/OGG/MP3 等载荷
+  maxOutputBytes: 64 * 1024 * 1024,
+});
+for (const { path, data } of result.files) {
+  // path 保留资源名称，data 是内存中的 WAV 字节。
+}
+```
+
+本版修正了旧 JS 的音频选项语义，与原 CLI 对齐：默认转换 WAV；显式 `none` 不转换，
+FSB 返回整个原始银行文件（`.fsb`）。转换时使用 AudioClip 的 `subsoundIndex` 选择子音频。
+支持 FSB5 PCM8/16/24/32/float、IMA ADPCM（含多声道）、FADPCM，以及 MP3/OGG Vorbis 转 PCM16 WAV。
+FSB Vorbis 重建仍依赖内嵌码本表，未知码本会失败；多流 MPEG 和 FSB3/4 转换尚未实现。
+支持内嵌音频、Unity 4.x `.resS` 和现代外置资源，严格检查采样数、偏移、截断及输出预算。
+
+MP3 和 Vorbis 解码器由固定版本源码预编译为内嵌 WASM；普通构建与安装不需要 C 编译器。
+自定义音频解析器仍可接收 ACB TextAsset 的 `{ path, data }`，本版不会把 ACB 当作 AudioClip 转码。

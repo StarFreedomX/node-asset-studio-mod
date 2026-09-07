@@ -47,6 +47,10 @@ test("published package installs offline without lifecycle downloads and runs wi
       "dist/vendor/assimp.wasm",
       "dist/licenses/LICENSE-assimp",
       "dist/licenses/LICENSE-assimpjs",
+      "dist/licenses/LICENSE-dr_mp3",
+      "dist/licenses/LICENSE-libvorbis",
+      "dist/licenses/LICENSE-libogg",
+      "dist/licenses/LICENSE-vgmstream",
     ])
       assert.ok(pack.files.some((f) => f.path === name));
     const consumer = path.join(temporary, "consumer");
@@ -113,6 +117,15 @@ test("published package installs offline without lifecycle downloads and runs wi
       new URL("./helpers/serialized.mjs", import.meta.url),
       path.join(consumer, "serialized.mjs"),
     );
+    await copyFile(
+      new URL("./helpers/audio.mjs", import.meta.url),
+      path.join(consumer, "audio.mjs"),
+    );
+    for (const type of ["mp3", "ogg"])
+      await copyFile(
+        new URL(`./fixtures/audio/tone.${type}`, import.meta.url),
+        path.join(consumer, `tone.${type}`),
+      );
     const astcGolden = JSON.parse(
       await readFile(
         new URL("./fixtures/astc-comment-banner-pixels.json", import.meta.url),
@@ -127,6 +140,11 @@ test("published package installs offline without lifecycle downloads and runs wi
       import { createHash } from 'node:crypto';
       import { rgbaPng } from './png.mjs';
       import {serialized,textureArray} from './serialized.mjs';
+      import {audioClip,parseWav} from './audio.mjs';
+      for (const type of ['mp3','ogg']) {
+        const audio=await readAssets(audioClip(await readFile('tone.'+type)),{audioFormat:'wav',log:false});
+        const w=parseWav(audio.files[0].data);assert.equal(w.rate,48000);assert.equal(w.channels,2);assert.equal(w.pcm.length,23040);
+      }
       const result = await readAssets(await readFile(process.env.FIXTURE), { unityVersion: '2022.3.62f1', log: false });
       assert.equal(result.exportedCount, 4);
       assert.ok(result.files.every(f => Buffer.from(f.data).subarray(0, 8).toString('hex') === '89504e470d0a1a0a'));

@@ -1,4 +1,5 @@
 import { addAnimation } from "./animation.js";
+import { AudioClip, convertAudio } from "./audio-clip.js";
 import { buildModel, ObjectResolver } from "./model.js";
 import { convertModel } from "./fbx.js";
 import { registerExtraTextureFormats } from "./texture-formats.js";
@@ -14,6 +15,7 @@ import { registerClass } from "unityfs-js";
 registerClass(187, "Texture2DArray", Texture2DArray);
 registerClass(152, "MovieTexture", MovieTexture);
 registerClass(111, "Animation", LegacyAnimation);
+registerClass(83, "AudioClip", AudioClip);
 
 import { convertShader } from "./shader.js";
 import type { TextureJob } from "./texture-engine.js";
@@ -867,7 +869,21 @@ export async function execute(
               }
             }
             let data: unknown, extension: string;
-            if (info.type === "MovieTexture") {
+            if (info.type === "AudioClip") {
+              const audio = await convertAudio(
+                obj,
+                (p, offset, size) =>
+                  m.resolveResource(
+                    obj.legacyResource ? sources.get(o) + ".resS" : p,
+                    offset,
+                    size,
+                  ),
+                c.audioFormat,
+                maxOutput - outputBytes,
+              );
+              data = audio.data;
+              extension = "." + audio.type;
+            } else if (info.type === "MovieTexture") {
               data = obj.movieData;
               extension = ".ogv";
             } else if (info.type === "Shader") {

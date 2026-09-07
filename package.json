@@ -1,6 +1,6 @@
 {
   "name": "node-asset-studio-mod-js",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Unity asset inspection and export in Node.js worker threads with JavaScript/WASM; no .NET runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,7 +15,8 @@
     "test:integration": "npm run build && node --test tests/integration.mjs",
     "pub": "npm publish",
     "test:package": "npm run build && node --test tests/package.mjs",
-    "build:astc": "node scripts/build-astc.js"
+    "build:astc": "node scripts/build-astc.js",
+    "build:audio": "node scripts/build-audio.js"
   },
   "files": [
     "dist",

@@ -206,3 +206,12 @@ AssetStudioMod v0.19.0 (MIT, license already included above). The local TypeScri
 FBX writer restores morph and Visibility animation connections omitted by the
 pinned Assimp build. Three.js 0.180.0 (MIT) is a development-only independent FBX
 reader for regression tests; its code is not included in the published runtime.
+
+## Audio conversion — dr_mp3, libvorbis, libogg, vgmstream
+
+The local WASM bundles dr_mp3 (MIT No Attribution, with minimp3 CC0 notice),
+Xiph libvorbis 1.3.7 and libogg 1.3.5 (BSD-3-Clause). FSB IMA/FADPCM TypeScript
+adapts vgmstream's ISC-licensed decoding layouts and arithmetic. Exact source
+revisions, generated-file hashes and rebuilding instructions are in `vendor/audio`.
+Full licenses ship as `dist/licenses/LICENSE-dr_mp3`, `LICENSE-libvorbis`,
+`LICENSE-libogg` and `LICENSE-vgmstream`. No FMOD runtime is used.

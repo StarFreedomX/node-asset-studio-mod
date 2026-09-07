@@ -1,0 +1,53 @@
+// Optional maintainer command. Normal build/pack uses the checked-in WASM.
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+const result = spawnSync(
+  process.env.EMCC ?? "emcc",
+  [
+    "vendor/audio/interface.c",
+    "vendor/audio/ogg/src/bitwise.c",
+    "vendor/audio/ogg/src/framing.c",
+    ...[
+      "mdct",
+      "smallft",
+      "block",
+      "envelope",
+      "window",
+      "lsp",
+      "lpc",
+      "analysis",
+      "synthesis",
+      "psy",
+      "info",
+      "floor1",
+      "floor0",
+      "res0",
+      "mapping0",
+      "registry",
+      "codebook",
+      "sharedbook",
+      "lookup",
+      "bitrate",
+      "vorbisfile",
+    ].map((f) => `vendor/audio/vorbis/lib/${f}.c`),
+    "-Ivendor/audio/ogg/include",
+    "-Ivendor/audio/vorbis/include",
+    "-Ivendor/audio/vorbis/lib",
+    "-O3",
+    "-sMODULARIZE=1",
+    "-sEXPORT_ES6=1",
+    "-sSINGLE_FILE=1",
+    "-sENVIRONMENT=node,worker",
+    "-sFILESYSTEM=0",
+    "-sALLOW_MEMORY_GROWTH=1",
+    "-sABORTING_MALLOC=0",
+    "-sINCOMING_MODULE_JS_API=[]",
+    '-sEXPORTED_FUNCTIONS=["_audio_open","_audio_channels","_audio_rate","_audio_read","_audio_close","_malloc","_free"]',
+    '-sEXPORTED_RUNTIME_METHODS=["HEAPU8"]',
+    "-o",
+    "vendor/audio/decoder.js",
+  ],
+  { cwd: fileURLToPath(new URL("../", import.meta.url)), stdio: "inherit" },
+);
+if (result.error) throw result.error;
+process.exit(result.status ?? 1);
