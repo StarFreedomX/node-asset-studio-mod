@@ -134,3 +134,7 @@ npm publish ./node-asset-studio-mod-js-0.1.0.tgz --access public
 ```
 
 `npm pack` 会通过 `prepack` 重新构建。每次发布应使用尚未发布的版本号。多个实现建议使用独立检出目录：Git 切换分支不会切换已安装依赖和下载的运行时文件。
+
+## 分支依赖隔离
+
+建议为 CLI、pipe、JS 使用独立 worktree，并在各目录执行 `pnpm install`，避免复用 `node_modules`。Git 切换分支不会清除 pnpm 的 `ignoredBuilds` 状态。依赖构建许可已写入本分支的 `pnpm-workspace.yaml`。本分支明确允许 esbuild 构建脚本。
